@@ -21,6 +21,8 @@ jobs:
           dotnet-version: 9.0.x
       - name: Compile native WPF app
         run: dotnet publish desktop/Nerqo.Desktop/Nerqo.Desktop.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:PublishReadyToRun=false -o dist/Windows
+      - name: Execute native LAN transport smoke test
+        run: dotnet run --project desktop/Nerqo.HostSmoke/Nerqo.HostSmoke.csproj -c Release
       - uses: actions/upload-artifact@v4
         with:
           name: Nerqo-Native-Windows-Preview

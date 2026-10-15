@@ -6,6 +6,9 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
+import android.net.wifi.SoftApConfiguration
 import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.Bundle
@@ -64,6 +67,7 @@ class MainActivity : ComponentActivity() {
             device = Device(prefs.getString("name", "Windows PC") ?: "Windows PC", host, storedPort)
             token = prefs.getString("token_$host", null)
         }
+        bindLocalNetwork()
         receiveShare(intent)
         setContent { NativeScreen() }
         if (device != null && token != null) refresh()
@@ -95,7 +99,19 @@ class MainActivity : ComponentActivity() {
             finally { runOnUiThread { busy = false } }
         }
     }
+    private fun bindLocalNetwork() {
+        try {
+            val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+            val wifi = cm.allNetworks.firstOrNull { network ->
+                cm.getNetworkCapabilities(network)?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
+            }
+            // Some offline Wi-Fi connections are not Android's default network.
+            // Bind only while this transfer app is active; restore on exit.
+            if (wifi != null) cm.bindProcessToNetwork(wifi)
+        } catch (_: Exception) { }
+    }
     private fun scan() = task {
+        bindLocalNetwork()
         runOnUiThread { message = "Finding devices on local Wi-Fi…" }
         val result = NativeClient.discover()
         runOnUiThread {
@@ -195,7 +211,7 @@ class MainActivity : ComponentActivity() {
         val wifi = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
         try {
             hotspotReservation?.close()
-            wifi.startLocalOnlyHotspot(object : WifiManager.LocalOnlyHotspotCallback() {
+            val callback = object : WifiManager.LocalOnlyHotspotCallback() {
                 override fun onStarted(reservation: WifiManager.LocalOnlyHotspotReservation) {
                     hotspotReservation = reservation
                     if (Build.VERSION.SDK_INT >= 30) {
@@ -209,13 +225,26 @@ class MainActivity : ComponentActivity() {
                 }
                 override fun onStopped() { hotspotText = ""; message = "Hotspot stopped" }
                 override fun onFailed(reason: Int) { hotspotText = ""; message = "Hotspot unavailable ($reason). Use system hotspot settings." }
-            }, null)
+            }
+            if (Build.VERSION.SDK_INT >= 36) {
+                try {
+                    val config = SoftApConfiguration.Builder().setBand(SoftApConfiguration.BAND_5GHZ).build()
+                    wifi.startLocalOnlyHotspotWithConfiguration(config, mainExecutor, callback)
+                    return
+                } catch (_: Exception) { /* Fallback to OS-selected band. */ }
+            }
+            wifi.startLocalOnlyHotspot(callback, null)
         } catch (e: Exception) {
             message = "Hotspot requires device support: ${e.message}"
             startActivity(Intent(Settings.ACTION_WIRELESS_SETTINGS))
         }
     }
-    override fun onDestroy() { hotspotReservation?.close(); executor.shutdownNow(); super.onDestroy() }
+    override fun onDestroy() {
+        hotspotReservation?.close()
+        (getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager).bindProcessToNetwork(null)
+        executor.shutdownNow()
+        super.onDestroy()
+    }
 
     @Composable private fun NativeScreen() {
         val bg = Color(0xFF101B2C)
@@ -306,7 +335,10 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                     Spacer(Modifier.height(12.dp))
-                    TextButton(onClick = { AppUpdater.check(this@MainActivity) }) { Text("Check Android updates ↗") }
+                    TextButton(onClick = {
+                        (getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager).bindProcessToNetwork(null)
+                        AppUpdater.check(this@MainActivity)
+                    }) { Text("Check Android updates ↗") }
                     Text("v0.4 native preview  ·  Trusted private LAN only", color = muted, fontSize = 11.sp)
                     Spacer(Modifier.height(20.dp))
                 }
