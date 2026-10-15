@@ -1,4 +1,7 @@
 using Nerqo.Desktop.Services;
+using MessageBox = System.Windows.MessageBox;
+using Clipboard = System.Windows.Clipboard;
+using OpenFileDialog = Microsoft.Win32.OpenFileDialog;
 using System.Diagnostics;
 using System.Windows;
 using System.Windows.Threading;
