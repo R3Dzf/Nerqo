@@ -134,8 +134,10 @@ class MainActivity : ComponentActivity() {
             if (stored != null && stored == discovered) {
                 NativeClient.trustIdentity(found, stored)
                 val access = prefs.getString("token_${found.address}", null)
-                val fresh = if (access != null) NativeClient.list(found, access) else emptyList()
-                runOnUiThread { token = access; entries = fresh; message = "Verified secure Windows connection"; if (access == null) { previewFingerprint = discovered; showPair = true } }
+                val fresh = try { if (access != null) NativeClient.list(found, access) else emptyList() }
+                    catch (_: PairingExpiredException) { prefs.edit().remove("token_${found.address}").apply(); emptyList() }
+                val approvedToken = if (access != null && prefs.getString("token_${found.address}", null) == access) access else null
+                runOnUiThread { token = approvedToken; entries = fresh; message = if (approvedToken == null) "Pair this device again" else "Verified secure Windows connection"; if (approvedToken == null) { previewFingerprint = discovered; showPair = true } }
             } else {
                 runOnUiThread {
                     token = null
@@ -165,8 +167,14 @@ class MainActivity : ComponentActivity() {
         val d = device ?: return
         val access = token ?: run { showPair = true; return }
         task {
-            val fresh = NativeClient.list(d, access)
-            runOnUiThread { entries = fresh; message = "Connected to ${d.name}" }
+            try {
+                val fresh = NativeClient.list(d, access)
+                runOnUiThread { entries = fresh; message = "Connected to ${d.name}" }
+            } catch (_: PairingExpiredException) {
+                val identity = NativeClient.previewIdentity(d)
+                prefs.edit().remove("token_${d.address}").apply()
+                runOnUiThread { token = null; entries = emptyList(); previewFingerprint = identity; fingerprintConfirmed = false; showPair = true; message = "Device access expired or was revoked. Verify Windows again." }
+            }
         }
     }
     private fun sendText() {

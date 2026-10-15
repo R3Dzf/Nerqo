@@ -36,4 +36,7 @@ var downloaded = await client.GetByteArrayAsync($"/api/files/{id}");
 if (!uploaded.SequenceEqual(downloaded)) throw new Exception("SHA-256 roundtrip mismatch");
 var items = await client.GetFromJsonAsync<JsonElement>("/api/items");
 if (items.GetProperty("items").GetArrayLength() < 2) throw new Exception("Shared items missing");
-Console.WriteLine("Nerqo native LAN smoke: pairing, auth, link, chunk upload, SHA256 download PASSED");
+var devices = host.PairedDevices;
+if (devices.Count == 0 || !host.RevokePeer(devices[0].TokenHash)) throw new Exception("Cannot revoke paired device");
+if ((await client.GetAsync("/api/items")).StatusCode != System.Net.HttpStatusCode.Unauthorized) throw new Exception("Revoked token still works");
+Console.WriteLine("Nerqo native encrypted LAN smoke: TLS, pairing, files, SHA256, peer revocation PASSED");

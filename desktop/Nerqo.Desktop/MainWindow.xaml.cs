@@ -65,7 +65,14 @@ public partial class MainWindow : Window
     {
         var entries = service.Items;
         ItemList.ItemsSource = entries;
+        PeerList.ItemsSource = service.PairedDevices;
         FooterLabel.Text = entries.Count + " items";
+    }
+    private void RevokeSelectedPeer(object s, RoutedEventArgs e)
+    {
+        if (PeerList.SelectedItem is not PairedDevice peer) return;
+        if (MessageBox.Show($"Remove {peer.Name} from trusted devices? They will need to pair again.", "Revoke access", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
+        if (service.RevokePeer(peer.TokenHash)) { RefreshItems(); FooterLabel.Text = $"Access removed: {peer.Name}"; }
     }
     private void CopyPairCode(object s, RoutedEventArgs e)
     {

@@ -34,6 +34,7 @@ internal sealed class UploadRecord
     public long Size { get; set; }
     public long Offset { get; set; }
 }
+public sealed record PairedDevice(string TokenHash, string Name, DateTimeOffset Expires);
 internal sealed class PeerRecord
 {
     public string Name { get; set; } = "";
@@ -68,6 +69,17 @@ public sealed class LanHost : IAsyncDisposable
     public string StorageDirectory => Path.Combine(root, "Storage");
     public event Action? Changed;
     public List<TransferItem> Items { get { lock (gate) return state.Items.OrderByDescending(x => x.Created).Take(150).Select(x => x).ToList(); } }
+    public List<PairedDevice> PairedDevices { get { lock (gate) return state.Peers.Where(x => x.Value.Expires > DateTimeOffset.UtcNow).Select(x => new PairedDevice(x.Key, x.Value.Name, x.Value.Expires)).OrderBy(x => x.Name).ToList(); } }
+    public bool RevokePeer(string tokenHash)
+    {
+        if (!Regex.IsMatch(tokenHash, "^[a-f0-9]{64}$")) return false;
+        lock (gate)
+        {
+            if (!state.Peers.Remove(tokenHash)) return false;
+            Save();
+            return true;
+        }
+    }
     public string[] Addresses => NetworkInterface.GetAllNetworkInterfaces().Where(n => n.OperationalStatus == OperationalStatus.Up && n.NetworkInterfaceType is not NetworkInterfaceType.Loopback and not NetworkInterfaceType.Tunnel)
       .SelectMany(n => n.GetIPProperties().UnicastAddresses)
       .Where(a => a.Address.AddressFamily == AddressFamily.InterNetwork && !IPAddress.IsLoopback(a.Address))

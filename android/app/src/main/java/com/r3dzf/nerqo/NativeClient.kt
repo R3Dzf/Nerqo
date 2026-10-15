@@ -33,6 +33,8 @@ internal data class SharedEntry(
     val size: Long, val sha256: String
 )
 
+internal class PairingExpiredException : IOException("Device pairing expired or was revoked")
+
 internal object NativeClient {
     private const val MAX_CHUNK = 4 * 1024 * 1024
     private val identities = ConcurrentHashMap<String, String>()
@@ -133,6 +135,7 @@ internal object NativeClient {
     private fun response(conn: HttpURLConnection): JSONObject {
         try {
             val status = conn.responseCode
+            if (status == 401) throw PairingExpiredException()
             if (status !in 200..299) {
                 val message = conn.errorStream?.bufferedReader()?.use { it.readText().take(256) } ?: "HTTP $status"
                 throw IOException("Nerqo: $message")
