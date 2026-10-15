@@ -4,7 +4,7 @@ using System.Security.Cryptography.X509Certificates;
 
 namespace Nerqo.Desktop.Services;
 
-/// <summary>Persistent local TLS certificate protected by Windows DPAPI (current user).</summary>
+/// <summary>Stable TLS identity: encrypted PFX under Windows user DPAPI and OS-managed user key store.</summary>
 public static class LanIdentity
 {
     public static X509Certificate2 LoadOrCreate(string folder)
@@ -16,7 +16,7 @@ public static class LanIdentity
             try
             {
                 byte[] pfx = ProtectedData.Unprotect(File.ReadAllBytes(path), null, DataProtectionScope.CurrentUser);
-                try { return new X509Certificate2(pfx, (string?)null, X509KeyStorageFlags.EphemeralKeySet); }
+                try { return new X509Certificate2(pfx, (string?)null, X509KeyStorageFlags.UserKeySet | X509KeyStorageFlags.PersistKeySet); }
                 finally { CryptographicOperations.ZeroMemory(pfx); }
             }
             catch (Exception e) when (e is CryptographicException or IOException)
@@ -37,7 +37,7 @@ public static class LanIdentity
             string staging = path + ".tmp";
             File.WriteAllBytes(staging, encrypted);
             File.Move(staging, path, overwrite: false);
-            return new X509Certificate2(raw, (string?)null, X509KeyStorageFlags.EphemeralKeySet);
+            return new X509Certificate2(raw, (string?)null, X509KeyStorageFlags.UserKeySet | X509KeyStorageFlags.PersistKeySet);
         }
         finally { CryptographicOperations.ZeroMemory(raw); }
     }
