@@ -1,0 +1,88 @@
+name: Publish privately signed Nerqo release
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'downloads/Nerqo-Android-v*.apk'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.13'}
+      - name: Test the application
+        run: python -m unittest discover -s tests -v
+      - name: Build Windows app
+        run: |
+          python -m pip install pyinstaller==6.16.0
+          pyinstaller --noconfirm --onefile --name Nerqo --add-data "web;web" --add-data "nerqo/replace_windows.ps1;nerqo" app.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nerqo-publish-windows
+          path: dist/Nerqo.exe
+  verified-release:
+    needs: [windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.13'}
+      - uses: actions/setup-java@v4
+        with: {distribution: temurin, java-version: '17'}
+      - uses: android-actions/setup-android@v4
+      - name: Set up Android SDK
+        run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
+      - uses: gradle/actions/setup-gradle@v4
+        with: {gradle-version: '8.13'}
+      - name: Recompile unsigned release independently
+        working-directory: android
+        run: gradle :app:assembleRelease --no-daemon
+      - name: Verify signature and source-compiled payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION=$(python -c 'from nerqo.version import VERSION; print(VERSION)')
+          APK="downloads/Nerqo-Android-v${VERSION}.apk"
+          UNSIGNED=android/app/build/outputs/apk/release/app-release-unsigned.apk
+          test -f "$APK"
+          (cd downloads && sha256sum --check --status "Nerqo-Android-v${VERSION}.apk.sha256")
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$APK" > "$RUNNER_TEMP/apk-verify.txt"
+          grep -q 'Verified using v2 scheme (APK Signature Scheme v2): true' "$RUNNER_TEMP/apk-verify.txt"
+          ACTUAL=$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' "$RUNNER_TEMP/apk-verify.txt" | head -1 | tr '[:upper:]' '[:lower:]')
+          EXPECTED=$(tr -d '[:space:]' < android/RELEASE_SIGNING_CERT.sha256)
+          test "$ACTUAL" = "$EXPECTED"
+          python tools/verify_published_apk.py "$UNSIGNED" "$APK"
+      - uses: actions/download-artifact@v4
+        with: {name: nerqo-publish-windows, path: staging/windows}
+      - name: Package and publish the verified release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION=$(python -c 'from nerqo.version import VERSION; print(VERSION)')
+          TAG="v${VERSION}"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists; not overwriting its assets"
+            exit 0
+          fi
+          mkdir -p staging/android staging/release previous
+          cp "downloads/Nerqo-Android-v${VERSION}.apk" staging/android/app-release.apk
+          PREV=$(gh release list --json tagName --limit 1 --jq '.[0].tagName' || true)
+          OLDARGS=()
+          if [ -n "$PREV" ]; then
+            gh release download "$PREV" --pattern 'Nerqo-Windows.exe' --dir previous || true
+            gh release download "$PREV" --pattern 'Nerqo-Android.apk' --dir previous || true
+            OLDARGS+=(--old-version "${PREV#v}")
+            if [ -f previous/Nerqo-Windows.exe ]; then OLDARGS+=(--old-windows previous/Nerqo-Windows.exe); fi
+            if [ -f previous/Nerqo-Android.apk ]; then OLDARGS+=(--old-android previous/Nerqo-Android.apk); fi
+          fi
+          python tools/build_release.py --version "$VERSION" --windows staging/windows/Nerqo.exe \
+            --android staging/android/app-release.apk --target staging/release "${OLDARGS[@]}"
+          gh release create "$TAG" staging/release/* --target "$GITHUB_SHA" --title "Nerqo $TAG" --generate-notes

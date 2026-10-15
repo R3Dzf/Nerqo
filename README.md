@@ -15,6 +15,10 @@ Nerqo is a local-first file, folder, link and text transfer companion for Window
 
 Run `Start-Nerqo.bat` or `python app.py` with Python 3.11+; the locally hosted UI opens in your browser. Connect your Android device through the same trusted local network. Android can use the app or a web browser.
 
+## Prebuilt stable Android APK
+
+[Download Android v0.3.0, permanently release-signed](downloads/Nerqo-Android-v0.3.0.apk). The signing certificate is pinned under `android/RELEASE_SIGNING_CERT.sha256` and the APK SHA-256 is published alongside the binary. See [private offline release signing](docs/OFFLINE_RELEASE_SIGNING.md) for the independent rebuild + signature verification workflow.
+
 ## Build and releases
 
 GitHub Actions automatically tests and builds Windows EXE, **debug Android APK**, and smoke-compiles an unsigned Android Release APK on ordinary pushes. The **manual-or-tagged release** pipeline requires the permanent Android release signing key held outside the public repository in GitHub Actions secrets; it verifies the certificate against `android/RELEASE_SIGNING_CERT.sha256`. The private keystore and recovery credentials must never be committed.
