@@ -8,6 +8,12 @@ if (!NativeUpdateService.IsNewerVersion("v0.6.0", new Version(0,5,0))) throw new
 if (NativeUpdateService.IsNewerVersion("v0.5.0", new Version(0,5,0))) throw new Exception("Same version should not upgrade");
 if (NativeUpdateService.IsNewerVersion("v0.3.0", new Version(0,5,0))) throw new Exception("Legacy release should not downgrade");
 if (NativeUpdateService.IsNewerVersion("v0.7.0-preview", new Version(0,5,0))) throw new Exception("Pre-release tag should be rejected");
+if (!LanHost.IsCandidateAddress(System.Net.IPAddress.Parse("192.168.43.1"))
+    || !LanHost.IsCandidateAddress(System.Net.IPAddress.Parse("10.0.0.10"))
+    || !LanHost.IsCandidateAddress(System.Net.IPAddress.Parse("172.16.10.1"))
+    || LanHost.IsCandidateAddress(System.Net.IPAddress.Parse("8.8.8.8"))
+    || LanHost.IsCandidateAddress(System.Net.IPAddress.Loopback))
+    throw new Exception("LAN address selection failed");
 await using var host = new LanHost();
 await host.StartAsync();
 await using (var secondInstance = new LanHost())

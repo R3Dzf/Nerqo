@@ -81,10 +81,31 @@ public sealed class LanHost : IAsyncDisposable
             return true;
         }
     }
-    public string[] Addresses => NetworkInterface.GetAllNetworkInterfaces().Where(n => n.OperationalStatus == OperationalStatus.Up && n.NetworkInterfaceType is not NetworkInterfaceType.Loopback and not NetworkInterfaceType.Tunnel)
-      .SelectMany(n => n.GetIPProperties().UnicastAddresses)
-      .Where(a => a.Address.AddressFamily == AddressFamily.InterNetwork && !IPAddress.IsLoopback(a.Address))
-      .Select(a => a.Address.ToString()).Distinct().ToArray();
+    // Prefer the actual Wi-Fi / phone hotspot. VPNs, VirtualBox adapters and
+    // inactive virtual NICs otherwise regularly produce an unusable QR address.
+    internal static bool IsCandidateAddress(IPAddress ip)
+    {
+        if (ip.AddressFamily != AddressFamily.InterNetwork) return false;
+        var a = ip.GetAddressBytes();
+        return a[0] == 10 || (a[0] == 172 && a[1] is >= 16 and <= 31)
+            || (a[0] == 192 && a[1] == 168) || (a[0] == 169 && a[1] == 254);
+    }
+    public string[] Addresses => NetworkInterface.GetAllNetworkInterfaces()
+        .Where(n => n.OperationalStatus == OperationalStatus.Up
+            && n.NetworkInterfaceType is not NetworkInterfaceType.Loopback and not NetworkInterfaceType.Tunnel)
+        .Select(n => new { Nic = n, Properties = n.GetIPProperties() })
+        .SelectMany(n => n.Properties.UnicastAddresses
+            .Where(a => IsCandidateAddress(a.Address))
+            .Select(a => new
+            {
+                Address = a.Address.ToString(),
+                Priority = (n.Nic.NetworkInterfaceType == NetworkInterfaceType.Wireless80211 ? 100 : 0)
+                    + (n.Properties.GatewayAddresses.Any(g => g.Address.AddressFamily == AddressFamily.InterNetwork) ? 20 : 0)
+                    + (a.Address.GetAddressBytes()[0] == 169 ? -50 : 0)
+            }))
+        .OrderByDescending(x => x.Priority)
+        .Select(x => x.Address)
+        .Distinct().ToArray();
 
     public LanHost()
     {
