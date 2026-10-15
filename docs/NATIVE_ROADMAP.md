@@ -7,7 +7,7 @@ Branch: `dev/native-5ghz-20261016`. This preview is **not a production release**
 - Windows: `.NET 9 / WPF`, built as a **WinExe**. Internal ASP.NET Core Kestrel listener shares process with the UI. No Python, shell, terminal or browser is opened by Nerqo. Minimizes to tray after initial launch. Receives files into `%LOCALAPPDATA%/Nerqo/Received`.
 - Android: Kotlin + Jetpack Compose, no WebView. Sends text, links, single/multiple files using the document picker, receives files using the system Save dialog. Automatic UDP LAN discovery + IP fallback.
 - Same-network and hotspot use the same LAN interface, no WAN service. Both clients must be on the same subnet; AP/client isolation and Windows Firewall can prevent discovery or connections.
-- UDP broadcast discovery: port `44889`, request `NERQO_DISCOVER_V1`. Replies include device name, port 44888, and (where detectable) Wi-Fi band. Does not reveal pairing PIN.
+- QR pairing: Windows displays an offline QR containing the SHA-256 TLS fingerprint, private IPv4 candidate addresses and rotating pairing PIN. Android scans locally using bundled ZXing, verifies the live certificate matches the QR fingerprint **before sending credentials**, and pairs automatically. Camera-only; no Google Play Services or Internet required.\n- UDP broadcast discovery: port `44889`, request `NERQO_DISCOVER_V1`. Replies include device name, port 44888, and (where detectable) Wi-Fi band. Does not reveal pairing PIN.
 - TCP transport: HTTPS/TLS on `44888`, paired bearer token, 4 MiB streaming chunks, SHA-256 chunk/file verification, resumable upload state. Windows-origin files are staged inside app data and mobile polls the shared item list. Android-origin files are saved in Windows Received. **TLS encrypted after verified pairing:** Android checks the full pinned certificate fingerprint, but independent security auditing is pending.
 
 ## 5 GHz priority — the physical layer
@@ -23,7 +23,7 @@ The actual MB/s is limited by negotiated Wi-Fi PHY, airtime contention, AP hardw
 | 01 Native transport protocol | Initial implementation | Kestrel+Android API; end-to-end device tests pending |
 | 02 Windows WPF | Initial implementation | Windows CI compilation and firewall test pending |
 | 03 Android Compose | Initial implementation | Android CI compilation and Android device test pending |
-| 04 Discover and pairing | Initial implementation | Broadcast, local IP fallback, rate limited pairing; QR and DNS-SD still pending |
+| 04 Discover and pairing | Improved | Offline QR pair with TLS pin and PIN, UDP broadcast and manual IP fallback; DNS-SD and device-to-device test pending |
 | 05 Files, resume, integrity | Initial implementation | 4 MiB chunks, SHA-256, 2 TB policy, crash recovery; pause/resume UI and folders pending |
 | 06 Text and links | Initial implementation | Android Share intent, Windows UI, copy; clipboard opt-in pending |
 | 07 Encrypted transport | In progress | TLS + visual fingerprint verification; peer revocation and adversarial security tests pending |

@@ -1,4 +1,8 @@
 using Nerqo.Desktop.Services;
+using QRCoder;
+using System.Text.Json;
+using System.IO;
+using System.Windows.Media.Imaging;
 using MessageBox = System.Windows.MessageBox;
 using Clipboard = System.Windows.Clipboard;
 using OpenFileDialog = Microsoft.Win32.OpenFileDialog;
@@ -33,6 +37,7 @@ public partial class MainWindow : Window
             StatusLabel.Text = "●  Ready on local network";
             AddressLabel.Text = service.Addresses.Length == 0 ? "Connect to Wi-Fi or a mobile hotspot." : "Local addresses: " + string.Join("  ·  ", service.Addresses);
             BandLabel.Text = "Wi-Fi link: " + await Task.Run(WifiInspector.GetBand) + "  |  Prefer 5 GHz / 6 GHz";
+            ShowPairingQr();
             SetupTray(); RefreshItems();
         }
         catch (Exception ex)
@@ -41,6 +46,27 @@ public partial class MainWindow : Window
             FooterLabel.Text = "Port 44888 may already be in use";
             MessageBox.Show($"Nerqo couldn't start its local receiver.\n\n{ex.Message}\n\nCheck Windows Firewall and make sure no previous instance is running.", "Nerqo connection", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
+    }
+    private void ShowPairingQr()
+    {
+        var addresses = service.Addresses.Take(6).ToArray();
+        if (addresses.Length == 0) { PairQrImage.ToolTip = "Connect Windows to Wi-Fi and reopen Nerqo"; return; }
+        string payload = JsonSerializer.Serialize(new
+        {
+            nerqo = 1, name = Environment.MachineName, addresses, port = LanHost.Port,
+            pin = service.PairCode, fingerprint = service.ServerFingerprint
+        });
+        using var generator = new QRCodeGenerator();
+        using var data = generator.CreateQrCode(payload, QRCodeGenerator.ECCLevel.M);
+        using var qr = new PngByteQRCode(data);
+        using var stream = new MemoryStream(qr.GetGraphic(4));
+        var image = new BitmapImage();
+        image.BeginInit();
+        image.CacheOption = BitmapCacheOption.OnLoad;
+        image.StreamSource = stream;
+        image.EndInit();
+        image.Freeze();
+        PairQrImage.Source = image;
     }
     private void SetupTray()
     {

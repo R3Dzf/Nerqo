@@ -8,6 +8,7 @@ class NativeSources(unittest.TestCase):
         project=(ROOT/'desktop/Nerqo.Desktop/Nerqo.Desktop.csproj').read_text()
         self.assertIn('<OutputType>WinExe</OutputType>',project)
         self.assertIn('<UseWPF>true</UseWPF>',project)
+        self.assertIn('QRCoder',project)
         code=(ROOT/'desktop/Nerqo.Desktop/MainWindow.xaml.cs').read_text()
         self.assertNotIn('WebView',code)
         self.assertNotIn('webbrowser.open',code)
@@ -15,6 +16,8 @@ class NativeSources(unittest.TestCase):
     def test_android_is_compose_not_webview(self):
         src=(ROOT/'android/app/src/main/java/com/r3dzf/nerqo/MainActivity.kt').read_text()
         self.assertIn('setContent',src)
+        self.assertIn('ScanContract()',src)
+        self.assertIn('pairFromQr(raw: String)',src)
         self.assertIn('startLocalOnlyHotspot',src)
         self.assertIn('wifiText()',src)
         self.assertNotIn('android.webkit.WebView',src)

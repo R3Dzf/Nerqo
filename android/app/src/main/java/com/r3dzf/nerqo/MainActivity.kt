@@ -17,6 +17,10 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import com.journeyapps.barcodescanner.ScanContract
+import com.journeyapps.barcodescanner.ScanOptions
+import org.json.JSONObject
+import java.io.IOException
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -42,6 +46,10 @@ import java.util.concurrent.Executors
 
 /** Fully native Android UI — no WebView, browser URL or remote page. */
 class MainActivity : ComponentActivity() {
+    private val qrLauncher = registerForActivityResult(ScanContract()) { result ->
+        val content = result.contents
+        if (content != null) pairFromQr(content)
+    }
     private val executor = Executors.newSingleThreadExecutor()
     private var device by mutableStateOf<Device?>(null)
     private var token by mutableStateOf<String?>(null)
@@ -220,6 +228,53 @@ class MainActivity : ComponentActivity() {
                 (octets[0] == 192 && octets[1] == 168) || (octets[0] == 169 && octets[1] == 254)
         } catch (_: Exception) { false }
     }
+    private fun scanPairQr() {
+        val options = ScanOptions().setDesiredBarcodeFormats(ScanOptions.QR_CODE)
+            .setPrompt("Scan the QR inside Nerqo on your Windows computer")
+            .setBeepEnabled(false).setOrientationLocked(false)
+        qrLauncher.launch(options)
+    }
+    private fun pairFromQr(raw: String) {
+        if (raw.length > 2048) { message = "QR code is too long"; return }
+        val json = try { JSONObject(raw) } catch (_: Exception) { message = "Not a Nerqo pairing QR code"; return }
+        if (json.optInt("nerqo") != 1 || json.optInt("port") != 44888) { message = "Unsupported Nerqo pairing code"; return }
+        val fp = json.optString("fingerprint").lowercase()
+        val pin = json.optString("pin")
+        val name = json.optString("name", "Windows PC").take(80)
+        val addresses = json.optJSONArray("addresses")
+        if (!fp.matches(Regex("[0-9a-f]{64}")) || !pin.matches(Regex("[0-9]{6}")) || addresses == null) {
+            message = "Invalid pairing QR"; return
+        }
+        val candidates = (0 until minOf(addresses.length(), 6)).mapNotNull { i ->
+            val ip = addresses.optString(i)
+            if (isPrivateIPv4(ip)) Device(name, ip) else null
+        }.distinctBy { it.address }
+        if (candidates.isEmpty()) { message = "No local Windows address in QR"; return }
+        task {
+            var lastFailure: Exception? = null
+            for (candidate in candidates) {
+                try {
+                    bindLocalNetwork()
+                    val presented = NativeClient.previewIdentity(candidate)
+                    if (presented != fp) throw IOException("Certificate did not match the QR code")
+                    NativeClient.trustIdentity(candidate, fp)
+                    val newToken = NativeClient.pair(candidate, pin)
+                    val newEntries = NativeClient.list(candidate, newToken)
+                    prefs.edit().putString("host", candidate.address).putInt("port", candidate.port)
+                        .putString("name", candidate.name)
+                        .putString("cert_${candidate.address}:${candidate.port}", fp)
+                        .putString("token_${candidate.address}", newToken).apply()
+                    runOnUiThread {
+                        device = candidate; token = newToken; entries = newEntries; nearby = listOf(candidate)
+                        showPair = false; previewFingerprint = ""; fingerprintConfirmed = false
+                        message = "Securely connected by QR to ${candidate.name}"
+                    }
+                    return@task
+                } catch (e: Exception) { lastFailure = e }
+            }
+            throw IOException("QR pairing failed on this network. Make sure the phone and PC are on the same Wi-Fi and allow Nerqo through Windows Firewall. ${lastFailure?.message ?: ""}")
+        }
+    }
     private fun manualConnect() {
         val input = manualIp.trim().removePrefix("http://")
         val parts = input.split(":")
@@ -325,7 +380,9 @@ class MainActivity : ComponentActivity() {
                         Column(Modifier.padding(18.dp)) {
                             Text(if (device == null || token == null) "Connect to your laptop" else "Connected to ${device?.name}", fontSize = 20.sp, fontWeight = FontWeight.Bold)
                             Text(message, color = muted, fontSize = 13.sp, modifier = Modifier.padding(top = 7.dp, bottom = 14.dp))
-                            Button(onClick = ::scan, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("⌁   Find nearby Windows device") }
+                            Button(onClick = ::scanPairQr, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("▣   Scan Windows pairing QR") }
+                            Spacer(Modifier.height(9.dp))
+                            OutlinedButton(onClick = ::scan, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("⌁   Find nearby Windows device") }
                             for (found in nearby) {
                                 OutlinedButton(onClick = { select(found) }, modifier = Modifier.fillMaxWidth()) { Text("▣  ${found.name}  •  ${found.address}", maxLines = 1, overflow = TextOverflow.Ellipsis) }
                             }
