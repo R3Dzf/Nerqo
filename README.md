@@ -11,7 +11,7 @@
 | Windows | C# .NET 9, WPF window, embedded ASP.NET Core transfer host, tray integration; no console or browser | `dotnet publish desktop/Nerqo.Desktop/Nerqo.Desktop.csproj -c Release -r win-x64 --self-contained true` |
 | Android | Kotlin, Jetpack Compose, native document pickers and share intents; no `WebView` | `cd android && gradle :app:assembleDebug` |
 
-Preview builds: [Nerqo native CI](https://github.com/R3Dzf/Nerqo/actions/workflows/native-preview.yml). Windows host smoke tests verify pairing/authentication, notes, chunk upload and file round-trip when CI is green.
+Preview builds: [Nerqo native CI](https://github.com/R3Dzf/Nerqo/actions/workflows/native-preview.yml). Windows host smoke tests verify pairing/authentication, notes, chunk upload and file round-trip. The native preview workflow also builds a per-user Windows installer and stages an unsigned Android release APK for private offline signing.
 
 ## Transfer and pairing
 

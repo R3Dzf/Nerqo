@@ -23,9 +23,18 @@ jobs:
         run: dotnet publish desktop/Nerqo.Desktop/Nerqo.Desktop.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:PublishReadyToRun=false -o dist/Windows
       - name: Execute native LAN transport smoke test
         run: dotnet run --project desktop/Nerqo.HostSmoke/Nerqo.HostSmoke.csproj -c Release
+      - name: Build normal Windows installer
+        shell: pwsh
+        run: |
+          choco install innosetup -y --no-progress
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" installer/Nerqo.iss
       - uses: actions/upload-artifact@v4
         with:
-          name: Nerqo-Native-Windows-Preview
+          name: Nerqo-Native-Windows-Setup-Preview
+          path: dist/Installer/*.exe
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Nerqo-Native-Windows-Portable-Preview
           path: dist/Windows/**
   android-native:
     runs-on: ubuntu-latest
@@ -52,6 +61,10 @@ jobs:
       - name: Compile unsigned native release APK
         working-directory: android
         run: gradle :app:assembleRelease --no-daemon
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Nerqo-Native-Android-Unsigned-Preview
+          path: android/app/build/outputs/apk/release/app-release-unsigned.apk
       - uses: actions/upload-artifact@v4
         with:
           name: Nerqo-Native-Android-Debug-Preview
