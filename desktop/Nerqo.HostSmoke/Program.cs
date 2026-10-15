@@ -112,6 +112,49 @@ var downloaded = await client.GetByteArrayAsync($"/api/files/{id}");
 if (!uploaded.SequenceEqual(downloaded)) throw new Exception("SHA-256 roundtrip mismatch");
 var items = await client.GetFromJsonAsync<JsonElement>("/api/items");
 if (items.GetProperty("items").GetArrayLength() < 2) throw new Exception("Shared items missing");
+// Simulate a Wi-Fi interruption between two chunks and resume using the same
+// transfer ID. The first committed chunk must not be sent twice.
+var total = Encoding.UTF8.GetBytes("resumable native upload over a disconnected five gigahertz link");
+var first = total.AsSpan(0, 24).ToArray();
+var second = total.AsSpan(24).ToArray();
+var startResume = await client.PostAsJsonAsync("/api/transfers/begin", new { name = "resume.txt", size = total.Length });
+startResume.EnsureSuccessStatusCode();
+string resumableId = (await startResume.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetString()!;
+using (var part1 = new ByteArrayContent(first))
+{
+    part1.Headers.Add("X-Offset", "0");
+    part1.Headers.Add("X-SHA256", Convert.ToHexString(SHA256.HashData(first)).ToLowerInvariant());
+    (await client.PutAsync($"/api/transfers/{resumableId}/chunk", part1)).EnsureSuccessStatusCode();
+}
+var resume = await client.PostAsJsonAsync("/api/transfers/begin",
+    new { name = "resume.txt", size = total.Length, resumeId = resumableId });
+resume.EnsureSuccessStatusCode();
+var resumeObject = await resume.Content.ReadFromJsonAsync<JsonElement>();
+if (resumeObject.GetProperty("offset").GetInt64() != first.Length) throw new Exception("Upload resume offset was lost");
+using (var wrongOffset = new ByteArrayContent(second))
+{
+    wrongOffset.Headers.Add("X-Offset", "0");
+    wrongOffset.Headers.Add("X-SHA256", Convert.ToHexString(SHA256.HashData(second)).ToLowerInvariant());
+    if ((await client.PutAsync($"/api/transfers/{resumableId}/chunk", wrongOffset)).StatusCode
+        != System.Net.HttpStatusCode.Conflict) throw new Exception("Incorrect resume offset accepted");
+}
+using (var part2 = new ByteArrayContent(second))
+{
+    part2.Headers.Add("X-Offset", first.Length.ToString());
+    part2.Headers.Add("X-SHA256", Convert.ToHexString(SHA256.HashData(second)).ToLowerInvariant());
+    (await client.PutAsync($"/api/transfers/{resumableId}/chunk", part2)).EnsureSuccessStatusCode();
+}
+(await client.PostAsJsonAsync($"/api/transfers/{resumableId}/finish", new {})).EnsureSuccessStatusCode();
+if (!total.SequenceEqual(await client.GetByteArrayAsync($"/api/files/{resumableId}")))
+    throw new Exception("Resumed file bytes differ from original");
+// Empty files should also survive begin/finish without producing a corrupt download.
+var emptyResponse = await client.PostAsJsonAsync("/api/transfers/begin", new { name = "empty.dat", size = 0 });
+emptyResponse.EnsureSuccessStatusCode();
+string emptyId = (await emptyResponse.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetString()!;
+(await client.PostAsJsonAsync($"/api/transfers/{emptyId}/finish", new {})).EnsureSuccessStatusCode();
+if ((await client.GetByteArrayAsync($"/api/files/{emptyId}")).Length != 0)
+    throw new Exception("Empty file transfer corrupted");
+
 var devices = host.PairedDevices;
 if (devices.Count == 0 || !host.RevokePeer(devices[0].TokenHash)) throw new Exception("Cannot revoke paired device");
 if ((await client.GetAsync("/api/items")).StatusCode != System.Net.HttpStatusCode.Unauthorized) throw new Exception("Revoked token still works");
