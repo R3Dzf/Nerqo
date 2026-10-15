@@ -53,4 +53,5 @@ dependencies {
     implementation("androidx.activity:activity-compose:1.10.1")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.9.3")
     implementation("com.journeyapps:zxing-android-embedded:4.3.0")
+    implementation("androidx.documentfile:documentfile:1.0.1")
 }

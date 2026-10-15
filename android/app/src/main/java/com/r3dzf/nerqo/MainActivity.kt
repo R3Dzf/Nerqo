@@ -208,6 +208,32 @@ class MainActivity : ComponentActivity() {
             runOnUiThread { entries = fresh; message = "Files sent successfully"; progress = 0f }
         }
     }
+    private fun submitFolder(treeUri: Uri) {
+        val d = device
+        val access = token
+        if (d == null || access == null) { message = "Pair with Windows first, then choose a folder"; return }
+        task {
+            runOnUiThread { message = "Preparing folder archive…" }
+            val archive = FolderArchive.stage(this, treeUri)
+            try {
+                NativeClient.sendFile(this, d, access, Uri.fromFile(archive), allowResume = false) { done, total ->
+                    runOnUiThread {
+                        progress = if (total <= 0) 1f else (done.toFloat() / total).coerceIn(0f, 1f)
+                        message = "Sending folder ZIP: " + "%.0f".format(progress * 100) + "%"
+                    }
+                }
+                val fresh = NativeClient.list(d, access)
+                runOnUiThread {
+                    entries = fresh
+                    progress = 0f
+                    message = "Folder sent as a ZIP with its subfolders preserved"
+                }
+            } finally {
+                archive.delete()
+                archive.parentFile?.delete()
+            }
+        }
+    }
     private fun download(entry: SharedEntry, target: Uri) {
         val d = device ?: return
         val access = token ?: return
@@ -337,6 +363,9 @@ class MainActivity : ComponentActivity() {
         val muted = Color(0xFFB6C9D9)
         val palette = darkColorScheme(primary = accent, onPrimary = Color(0xFF153B32), surface = panel, background = bg, onBackground = Color.White, onSurface = Color.White)
         val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris -> if (uris.isNotEmpty()) submitFiles(uris) }
+        val folderPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+            if (uri != null) submitFolder(uri)
+        }
         val writer = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
             val item = pendingDownload
             if (uri != null && item != null) download(item, uri)
@@ -398,6 +427,11 @@ class MainActivity : ComponentActivity() {
                             Text("Send to Windows", fontWeight = FontWeight.Bold, fontSize = 20.sp)
                             Spacer(Modifier.height(8.dp))
                             Button(onClick = { picker.launch(arrayOf("*/*")) }, modifier = Modifier.fillMaxWidth(), enabled = !busy && token != null) { Text("↑  Choose files") }
+                            Spacer(Modifier.height(8.dp))
+                            OutlinedButton(onClick = { folderPicker.launch(null) }, modifier = Modifier.fillMaxWidth(),
+                                enabled = !busy && token != null) { Text("↑  Send folder (ZIP)") }
+                            Text("Keeps subfolders and empty folders; folder ZIPs need temporary phone storage.",
+                                color = muted, fontSize = 11.sp)
                             Spacer(Modifier.height(10.dp))
                             OutlinedTextField(value = shareText, onValueChange = { shareText = it }, label = { Text("Text or link") }, minLines = 2, modifier = Modifier.fillMaxWidth())
                             Button(onClick = ::sendText, enabled = !busy && token != null && shareText.isNotBlank(), modifier = Modifier.fillMaxWidth()) { Text("Send text / link") }
