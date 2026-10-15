@@ -41,7 +41,14 @@ jobs:
       - name: Build APK
         working-directory: android
         run: gradle :app:assembleDebug --no-daemon
+      - name: Smoke-test Android Release build (unsigned)
+        working-directory: android
+        run: gradle :app:assembleRelease --no-daemon
+      - name: Confirm smoke-test APK is not published as a signed release
+        run: |
+          test -f android/app/build/outputs/apk/release/app-release-unsigned.apk
+          echo "Release compilation passed. This APK is UNSIGNED and intentionally not uploaded."
       - uses: actions/upload-artifact@v4
         with:
-          name: Nerqo-Android
+          name: Nerqo-Android-Debug-Not-For-Updates
           path: android/app/build/outputs/apk/debug/*.apk

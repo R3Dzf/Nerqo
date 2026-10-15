@@ -17,10 +17,14 @@ Create all four secrets:
 
 On Windows, `tools/configure-android-signing.ps1` can set these secrets using authenticated GitHub CLI, while keeping passwords out of your command history. **This chat's GitHub connector cannot write repository secrets**; a tagged release will fail closed until these are configured.
 
-Tag `v0.3.0` only when these secrets exist. The workflow compares the keystore's SHA-256 certificate fingerprint to the pinned fingerprint before signing, then verifies the signed APK with Android `apksigner`.
+After adding the secrets, open **Actions → Publish signed updates for Windows and Android → Run workflow**, enter `v0.3.0` in the `version` input and run. The workflow checks that the version matches the application, builds and verifies the signed release APK, creates the `v0.3.0` GitHub Release and tag, and publishes matching Windows binaries. Alternatively, pushing the `v0.3.0` Git tag triggers the same process. **Do not publish a release until all four secrets are configured.** The workflow compares the keystore's SHA-256 certificate fingerprint to the pinned fingerprint before signing, then verifies the signed APK with Android `apksigner`.
 
 ## Compatibility, permanence and recovery
 
 Android only permits a package update when the installed and incoming APKs have compatible signing certificates, and a higher `versionCode`. An earlier debug-signed install cannot be updated in place by our independently signed production release. The transition from debug to production therefore requires a one-time reinstall; export any data that should be retained first. Once installed from the stable release key, future APKs **must** use the same identity. Store the keystore and passwords permanently, or updates may become impossible.
 
 Self-signing is sufficient for sideloaded Android APK continuity, but does not provide the Windows publisher reputation offered by a publicly trusted Authenticode certificate. Windows release binaries are currently unsigned; they still use SHA-256 package checks for delta updates.
+
+### Build confidence without compromising the key
+
+Normal `main` builds compile a Debug APK *and an unsigned Release APK* to exercise release-specific Android build settings, but they upload only the Debug APK, explicitly labeled as unsuitable for upgrades. This is not equivalent to a signed stable release. The protected tag/manual release job refuses to run when any signing secret is missing and compares the signing certificate fingerprint before and after building.

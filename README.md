@@ -17,7 +17,7 @@ Run `Start-Nerqo.bat` or `python app.py` with Python 3.11+; the locally hosted U
 
 ## Build and releases
 
-GitHub Actions automatically tests and builds Windows EXE and **debug Android APK** for ordinary pushes. The **tagged release** pipeline requires the permanent Android release signing key held outside the public repository in GitHub Actions secrets; it verifies the certificate against `android/RELEASE_SIGNING_CERT.sha256`. The private keystore and recovery credentials must never be committed.
+GitHub Actions automatically tests and builds Windows EXE, **debug Android APK**, and smoke-compiles an unsigned Android Release APK on ordinary pushes. The **manual-or-tagged release** pipeline requires the permanent Android release signing key held outside the public repository in GitHub Actions secrets; it verifies the certificate against `android/RELEASE_SIGNING_CERT.sha256`. The private keystore and recovery credentials must never be committed.
 
 See [docs/SIGNING.md](docs/SIGNING.md) for steps and the important Android update-signature compatibility rule; see [docs/UPDATES.md](docs/UPDATES.md) for the delta protocol.
 

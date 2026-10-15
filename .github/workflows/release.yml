@@ -2,6 +2,12 @@ name: Publish signed updates for Windows and Android
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Tag of the signed release, e.g. v0.3.0'
+        required: true
+        type: string
 permissions:
   contents: read
 jobs:
@@ -81,7 +87,7 @@ jobs:
       - name: Collect previous release and prepare deltas
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
         run: |
           python - <<'PY'
           from nerqo.version import VERSION
@@ -105,5 +111,5 @@ jobs:
       - name: Publish full and delta assets
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
-        run: gh release create "$TAG" staging/release/* --title "Nerqo $TAG" --generate-notes
+          TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
+        run: gh release create "$TAG" staging/release/* --target "$GITHUB_SHA" --title "Nerqo $TAG" --generate-notes

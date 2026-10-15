@@ -22,6 +22,8 @@ class UISigningTests(unittest.TestCase):
         self.assertRegex(cert,r'^[0-9a-f]{64}$')
         self.assertFalse(list(ROOT.rglob('*.p12')))
         self.assertFalse(list(ROOT.rglob('*.jks')))
+        self.assertFalse(list(ROOT.rglob('*.keystore')))
+        self.assertFalse(list(ROOT.rglob('*signing-recovery*.txt')))
     def test_versions_match(self):
         from nerqo.version import VERSION
         self.assertEqual(VERSION,'0.3.0')
@@ -34,6 +36,12 @@ class UISigningTests(unittest.TestCase):
         self.assertIn('Verify signed Android APK',wf)
         self.assertIn('NERQO_ANDROID_KEYSTORE_BASE64',wf)
         self.assertIn('apksigner',wf)
+        self.assertIn('workflow_dispatch:',wf)
+        ci=(ROOT/'.github/workflows/build.yml').read_text()
+        self.assertIn('assembleRelease',ci)
+        self.assertIn('app-release-unsigned.apk',ci)
+        gradle=(ROOT/'android/app/build.gradle.kts').read_text()
+        self.assertIn('if (!signingFile.isNullOrBlank())',gradle)
 
 if __name__ == '__main__':
     unittest.main()
