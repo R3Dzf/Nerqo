@@ -4,6 +4,10 @@ import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.Intent;
 import android.net.Uri;
+import android.net.Network;
+import android.net.ConnectivityManager;
+import android.net.NetworkCapabilities;
+import android.content.Context;
 import android.os.Build;
 import android.provider.Settings;
 import android.widget.Toast;
@@ -21,7 +25,24 @@ public final class AppUpdater {
     private static final String API = "https://api.github.com/repos/" + REPO + "/releases/latest";
     private static final long MAX_BYTES = 3L * 1024 * 1024 * 1024;
     private final Activity activity;
-    private AppUpdater(Activity activity) {this.activity=activity;}
+    private final Network internetNetwork;
+    private AppUpdater(Activity activity) {
+        this.activity = activity;
+        // A local-only Wi-Fi/hotspot has no Internet. Avoid rebinding the
+        // entire process away from that LAN, which would break transfers.
+        // Only the updater's HTTP calls use an independently validated WAN.
+        ConnectivityManager cm = (ConnectivityManager) activity.getSystemService(Context.CONNECTIVITY_SERVICE);
+        Network selected = null;
+        Network fallback = null;
+        for (Network network : cm.getAllNetworks()) {
+            NetworkCapabilities caps = cm.getNetworkCapabilities(network);
+            if (caps == null || !caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                || !caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)) continue;
+            if (caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)) { selected = network; break; }
+            if (fallback == null) fallback = network;
+        }
+        internetNetwork = selected != null ? selected : fallback;
+    }
     public static void check(Activity activity) {new AppUpdater(activity).runCheck();}
     private void ui(Runnable action){activity.runOnUiThread(action);}
     private void note(String message){ui(()->Toast.makeText(activity,message,Toast.LENGTH_LONG).show());}
@@ -35,10 +56,11 @@ public final class AppUpdater {
         for(int i=0;i<3;i++){int delta=Integer.compare(Integer.parseInt(x[i]),Integer.parseInt(y[i]));if(delta!=0)return delta>0;}
         return false;
     }
-    private static HttpURLConnection request(String path) throws Exception {
+    private HttpURLConnection request(String path) throws Exception {
         URL url = new URL(path);
         if(!"https".equals(url.getProtocol()))throw new IOException("HTTPS required");
-        HttpURLConnection conn=(HttpURLConnection)url.openConnection();
+        if (internetNetwork == null) throw new IOException("Internet is not available for app updates. Local file transfers still work.");
+        HttpURLConnection conn=(HttpURLConnection)internetNetwork.openConnection(url);
         conn.setConnectTimeout(15000);conn.setReadTimeout(45000);
         conn.setRequestProperty("User-Agent","Nerqo-Updater/0.2");
         conn.setRequestProperty("Accept","application/vnd.github+json");
@@ -48,7 +70,7 @@ public final class AppUpdater {
         }
         return conn;
     }
-    private static byte[] readLimited(String url,int limit) throws Exception {
+    private byte[] readLimited(String url,int limit) throws Exception {
         HttpURLConnection conn = request(url);
         try(InputStream in=conn.getInputStream();ByteArrayOutputStream out=new ByteArrayOutputStream()) {
             byte[] b=new byte[8192];int count;
@@ -109,7 +131,7 @@ public final class AppUpdater {
         String name=verifyName(meta);
         if(!prefix.concat(name).equals(urls.optString(name)))throw new IOException("Untrusted update URL");
     }
-    private static void download(String url,JSONObject meta,File out) throws Exception {
+    private void download(String url,JSONObject meta,File out) throws Exception {
         long expected=meta.getLong("size"),received=0;
         java.security.MessageDigest digest=java.security.MessageDigest.getInstance("SHA-256");
         HttpURLConnection conn=request(url);

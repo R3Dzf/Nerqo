@@ -433,7 +433,8 @@ class MainActivity : ComponentActivity() {
                     }
                     Spacer(Modifier.height(12.dp))
                     TextButton(onClick = {
-                        (getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager).bindProcessToNetwork(null)
+                        // The updater selects a validated Internet network without
+                        // disrupting Nerqo's offline LAN connection.
                         AppUpdater.check(this@MainActivity)
                     }) { Text("Check Android updates ↗") }
                     Text("v0.5 native preview  ·  Trusted private LAN only", color = muted, fontSize = 11.sp)
