@@ -32,10 +32,26 @@ string id = (await begin.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("
 using var chunk = new ByteArrayContent(uploaded);
 chunk.Headers.Add("X-Offset", "0");
 chunk.Headers.Add("X-SHA256", Convert.ToHexString(SHA256.HashData(uploaded)).ToLowerInvariant());
+using (var noHash = new ByteArrayContent(uploaded))
+{
+    noHash.Headers.Add("X-Offset", "0");
+    var response = await client.PutAsync($"/api/transfers/{id}/chunk", noHash);
+    if (response.StatusCode != System.Net.HttpStatusCode.UnprocessableEntity) throw new Exception("Missing chunk checksum accepted");
+}
+using (var wrongHash = new ByteArrayContent(uploaded))
+{
+    wrongHash.Headers.Add("X-Offset", "0");
+    wrongHash.Headers.Add("X-SHA256", new string('0', 64));
+    var response = await client.PutAsync($"/api/transfers/{id}/chunk", wrongHash);
+    if (response.StatusCode != System.Net.HttpStatusCode.UnprocessableEntity) throw new Exception("Invalid chunk checksum accepted");
+}
 var put = await client.PutAsync($"/api/transfers/{id}/chunk", chunk);
 put.EnsureSuccessStatusCode();
 var finish = await client.PostAsJsonAsync($"/api/transfers/{id}/finish", new {});
 finish.EnsureSuccessStatusCode();
+var received = Path.Combine(host.ReceivedDirectory, "native.txt");
+if (!File.Exists(received) || !uploaded.SequenceEqual(await File.ReadAllBytesAsync(received)))
+    throw new Exception("Android upload was not saved to the Windows Received folder");
 var downloaded = await client.GetByteArrayAsync($"/api/files/{id}");
 if (!uploaded.SequenceEqual(downloaded)) throw new Exception("SHA-256 roundtrip mismatch");
 var items = await client.GetFromJsonAsync<JsonElement>("/api/items");

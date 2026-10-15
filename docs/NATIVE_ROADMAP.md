@@ -49,3 +49,9 @@ Neither Wi-Fi Direct nor Bluetooth transports, end-to-end encryption, QR pairing
 ### Changed Wi-Fi / hotspot after launch
 
 Use **Refresh network and QR** in the Windows app after connecting to another Wi-Fi SSID or your phone hotspot. This recalculates the local addresses and regenerates the QR with the current addresses and the same pinned certificate identity; no restart, browser, terminal or Internet is required. When network isolation or firewall rules block incoming TCP 44888, the QR cannot bypass that restriction.
+
+### Production hardening (October 2026)
+
+- Require SHA-256 of every native upload chunk; reject missing or incorrect digests before committing an offset.
+- Use NTFS hard links between Nerqo Storage and Windows Received to prevent duplicate disk usage for large Android uploads (copy fallback on unsupported volumes).
+- Windows native updater checks only newer stable GitHub releases, validates the native Installer asset and its manifest before downloading, verifies size and SHA-256, and obtains explicit permission before starting setup. It currently downloads the full installer; native installer Delta reconstruction and real-world upgrade acceptance tests remain outstanding.

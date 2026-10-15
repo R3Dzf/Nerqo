@@ -8,6 +8,7 @@ using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using System.Runtime.InteropServices;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
@@ -104,6 +105,18 @@ public sealed class LanHost : IAsyncDisposable
         File.WriteAllText(staging, JsonSerializer.Serialize(state));
         File.Move(staging, output, true);
         Changed?.Invoke();
+    }
+    [DllImport("kernel32.dll", EntryPoint = "CreateHardLinkW", CharSet = CharSet.Unicode, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool CreateHardLink(string newFile, string existingFile, IntPtr securityAttributes);
+
+    // Incoming files stay available both to the Windows user and Android, with
+    // one physical copy on NTFS. This prevents a 100 GB upload from needing 200 GB.
+    // Some filesystems do not support hard links, so copy is a safe fallback.
+    private static void LinkOrCopy(string source, string target)
+    {
+        if (!OperatingSystem.IsWindows() || !CreateHardLink(target, source, IntPtr.Zero))
+            File.Copy(source, target);
     }
     private static string Hex(byte[] bytes) => Convert.ToHexString(bytes).ToLowerInvariant();
     private static string Digest(string secret) => Hex(SHA256.HashData(Encoding.UTF8.GetBytes(secret)));
@@ -245,7 +258,10 @@ public sealed class LanHost : IAsyncDisposable
             byte[] data = new byte[length];
             await ctx.Request.Body.ReadExactlyAsync(data, ctx.RequestAborted);
             string? hash = ctx.Request.Headers["X-SHA256"].ToString();
-            if (!string.IsNullOrEmpty(hash) && !CryptographicOperations.FixedTimeEquals(Encoding.ASCII.GetBytes(Hex(SHA256.HashData(data))), Encoding.ASCII.GetBytes(hash.ToLowerInvariant()))) return Results.UnprocessableEntity();
+            if (hash is null || !Regex.IsMatch(hash, "^[a-fA-F0-9]{64}$")
+                || !CryptographicOperations.FixedTimeEquals(
+                    SHA256.HashData(data), Convert.FromHexString(hash)))
+                return Results.UnprocessableEntity();
             lock (gate)
             {
                 if (!state.Uploads.TryGetValue(id, out var t) || t.Owner != Digest(Bearer(ctx)!) || t.Offset != offset || offset + length > t.Size) return Results.Conflict();
@@ -269,7 +285,7 @@ public sealed class LanHost : IAsyncDisposable
                 state.Items.Add(item); state.Uploads.Remove(id); Save();
                 // Explicit file copy makes the received file accessible to the Windows user.
                 string target = UniqueReceivedName(t.Name);
-                File.Copy(finalPath, target);
+                LinkOrCopy(finalPath, target);
                 return Results.Json(new { id, name = t.Name, size = t.Size, sha256 = hash });
             }
         });
