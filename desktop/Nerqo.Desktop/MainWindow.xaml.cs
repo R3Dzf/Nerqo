@@ -144,7 +144,7 @@ public partial class MainWindow : Window
                 MessageBox.Show("You have the latest eligible Nerqo Windows version. Offline file transfer continues to work without internet.", "Nerqo updates", MessageBoxButton.OK, MessageBoxImage.Information);
                 return;
             }
-            if (MessageBox.Show($"Nerqo {release.Version} is available.\n\nDownload verified Windows installer ({release.Size / 1048576.0:0.0} MB)? Your files and paired devices will be preserved.\n\nUpdates require internet. File transfers do not.", "Nerqo updates", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
+            if (MessageBox.Show($"Nerqo {release.Version} is available.\n\nDownload verified Windows installer ({(release.Delta?.Size ?? release.Size) / 1048576.0:0.0} MB{(release.Delta == null ? "" : " delta")}; full: {release.Size / 1048576.0:0.0} MB)? Your files and paired devices will be preserved.\n\nUpdates require internet. File transfers do not.", "Nerqo updates", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
                 return;
             var progress = new Progress<int>(percent => FooterLabel.Text = $"Downloading Windows update: {percent}%");
             var installer = await NativeUpdateService.DownloadAsync(release, progress, CancellationToken.None);

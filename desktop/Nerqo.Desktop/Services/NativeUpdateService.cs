@@ -12,7 +12,8 @@ namespace Nerqo.Desktop.Services;
 /// Inno Setup installer listed in a GitHub Release and its verified manifest
 /// is accepted. This cannot silently authenticate an unsigned publisher.
 /// </summary>
-public sealed record NativeRelease(string Version, string Url, long Size, string Sha256);
+public sealed record NativeDeltaAsset(string Url, long Size, string Sha256, string OriginalInstaller);
+public sealed record NativeRelease(string Version, string Url, long Size, string Sha256, NativeDeltaAsset? Delta = null);
 
 public static class NativeUpdateService
 {
@@ -77,7 +78,8 @@ public static class NativeUpdateService
         {
             string name = asset.GetProperty("name").GetString() ?? "";
             string url = asset.GetProperty("browser_download_url").GetString() ?? "";
-            if (name is "update-manifest.json" or InstallerName)
+            if (name is "update-manifest.json" or InstallerName
+                || Regex.IsMatch(name, @"^Nerqo-windows-from-\d+\.\d+\.\d+\.nrqd$"))
                 names[name] = url;
         }
         if (!names.TryGetValue("update-manifest.json", out var manifestUrl)
@@ -97,51 +99,130 @@ public static class NativeUpdateService
         string hash = full.GetProperty("sha256").GetString() ?? "";
         if (size <= 0 || size > MaxInstaller || !Regex.IsMatch(hash, "^[0-9a-f]{64}$"))
             throw new IOException("Invalid Windows installer metadata");
-        return new NativeRelease(tag[1..], installerUrl, size, hash);
+        NativeDeltaAsset? bestDelta = null;
+        var windows = body.GetProperty("assets").GetProperty("windows");
+        if (windows.TryGetProperty("deltas", out var list) && list.ValueKind == JsonValueKind.Array)
+        {
+            string current = installed.ToString(3);
+            string originalInstaller = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "Nerqo", "Updates", $"Nerqo-Windows-Setup-{current}.exe");
+            foreach (var item in list.EnumerateArray())
+            {
+                if (item.GetProperty("from_version").GetString() != current) continue;
+                string patchName = item.GetProperty("name").GetString() ?? "";
+                if (patchName != $"Nerqo-windows-from-{current}.nrqd") continue;
+                if (!names.TryGetValue(patchName, out var downloadUrl)
+                    || downloadUrl != Expected(tag, patchName).ToString()) continue;
+                long patchSize = item.GetProperty("size").GetInt64();
+                string patchHash = item.GetProperty("sha256").GetString() ?? "";
+                string oldHash = item.GetProperty("base_sha256").GetString() ?? "";
+                if (patchSize <= 0 || patchSize >= size * .9 || patchSize > MaxInstaller
+                    || !Regex.IsMatch(patchHash, "^[0-9a-f]{64}$")
+                    || !Regex.IsMatch(oldHash, "^[0-9a-f]{64}$")
+                    || !File.Exists(originalInstaller)) continue;
+                var infoFile = new FileInfo(originalInstaller);
+                if (infoFile.Length <= 0 || infoFile.Length > MaxInstaller) continue;
+                string actual = await Task.Run(() =>
+                {
+                    using var file = File.OpenRead(originalInstaller);
+                    return Convert.ToHexString(SHA256.HashData(file)).ToLowerInvariant();
+                }, ct);
+                if (!actual.Equals(oldHash, StringComparison.Ordinal)) continue;
+                if (bestDelta == null || patchSize < bestDelta.Size)
+                    bestDelta = new NativeDeltaAsset(downloadUrl, patchSize, patchHash, originalInstaller);
+            }
+        }
+        return new NativeRelease(tag[1..], installerUrl, size, hash, bestDelta);
+    }
+
+    private static async Task DownloadVerifiedAsync(Uri url, long expected, string checksum,
+        string staging, IProgress<int>? progress, CancellationToken ct)
+    {
+        if (url.Scheme != Uri.UriSchemeHttps || expected <= 0 || expected > MaxInstaller)
+            throw new IOException("Invalid update download");
+        using var response = await Client.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, ct);
+        response.EnsureSuccessStatusCode();
+        if (response.RequestMessage?.RequestUri?.Scheme != Uri.UriSchemeHttps)
+            throw new IOException("Insecure update redirect");
+        if (response.Content.Headers.ContentLength is long length && length != expected)
+            throw new IOException("Update download length differs from metadata");
+        await using var input = await response.Content.ReadAsStreamAsync(ct);
+        await using var output = new FileStream(staging, FileMode.CreateNew, FileAccess.Write,
+            FileShare.None, 256 * 1024, FileOptions.Asynchronous);
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        byte[] buffer = new byte[256 * 1024];
+        long downloaded = 0;
+        while (true)
+        {
+            int n = await input.ReadAsync(buffer, ct);
+            if (n == 0) break;
+            downloaded += n;
+            if (downloaded > expected) throw new IOException("Oversized update asset");
+            await output.WriteAsync(buffer.AsMemory(0, n), ct);
+            hash.AppendData(buffer, 0, n);
+            progress?.Report((int)(100 * downloaded / expected));
+        }
+        await output.FlushAsync(ct);
+        if (downloaded != expected
+            || !Convert.ToHexString(hash.GetHashAndReset()).Equals(checksum, StringComparison.OrdinalIgnoreCase))
+            throw new IOException("Update asset failed SHA-256 verification");
     }
 
     public static async Task<string> DownloadAsync(NativeRelease release, IProgress<int>? progress, CancellationToken ct)
     {
         string tag = "v" + release.Version;
-        if (release.Url != Expected(tag, InstallerName).ToString()
+        if (!IsNewerVersion(tag, typeof(NativeUpdateService).Assembly.GetName().Version ?? new Version(0, 5, 0))
+            || release.Url != Expected(tag, InstallerName).ToString()
             || release.Size <= 0 || release.Size > MaxInstaller
             || !Regex.IsMatch(release.Sha256, "^[0-9a-f]{64}$"))
-            throw new IOException("Untrusted installer metadata");
-        var directory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Nerqo", "Updates");
+            throw new IOException("Untrusted or older installer metadata");
+        var directory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "Nerqo", "Updates");
         Directory.CreateDirectory(directory);
-        string staging = Path.Combine(directory, $"{Guid.NewGuid():N}.part");
+        string temporary = Guid.NewGuid().ToString("N");
+        string stage = Path.Combine(directory, temporary + ".part");
+        string patch = Path.Combine(directory, temporary + ".nrqd");
         string complete = Path.Combine(directory, $"Nerqo-Windows-Setup-{release.Version}.exe");
         try
         {
-            using var response = await Client.GetAsync(new Uri(release.Url), HttpCompletionOption.ResponseHeadersRead, ct);
-            response.EnsureSuccessStatusCode();
-            if (response.RequestMessage?.RequestUri?.Scheme != Uri.UriSchemeHttps)
-                throw new IOException("Insecure installer download");
-            if (response.Content.Headers.ContentLength is long count && count != release.Size)
-                throw new IOException("Installer size differs from manifest");
-            await using var input = await response.Content.ReadAsStreamAsync(ct);
-            await using var output = new FileStream(staging, FileMode.CreateNew, FileAccess.Write, FileShare.None, 256 * 1024, FileOptions.Asynchronous);
-            using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-            byte[] buffer = new byte[256 * 1024];
-            long downloaded = 0;
-            while (true)
+            bool patched = false;
+            if (release.Delta is { } delta
+                && delta.Url.StartsWith($"https://github.com/{Repo}/releases/download/{tag}/", StringComparison.Ordinal)
+                && delta.Size > 0 && delta.Size < release.Size * .9
+                && Regex.IsMatch(delta.Sha256, "^[0-9a-f]{64}$")
+                && File.Exists(delta.OriginalInstaller))
             {
-                int n = await input.ReadAsync(buffer, ct);
-                if (n == 0) break;
-                downloaded += n;
-                if (downloaded > release.Size) throw new IOException("Oversized Windows installer");
-                await output.WriteAsync(buffer.AsMemory(0, n), ct);
-                hash.AppendData(buffer, 0, n);
-                progress?.Report((int)(100 * downloaded / release.Size));
+                try
+                {
+                    await DownloadVerifiedAsync(new Uri(delta.Url), delta.Size, delta.Sha256, patch, progress, ct);
+                    await Task.Run(() => NativeDelta.Apply(delta.OriginalInstaller, patch, stage), ct);
+                    using var reconstructed = File.OpenRead(stage);
+                    patched = reconstructed.Length == release.Size
+                        && Convert.ToHexString(SHA256.HashData(reconstructed))
+                            .Equals(release.Sha256, StringComparison.OrdinalIgnoreCase);
+                    if (!patched) throw new InvalidDataException("Delta output integrity mismatch");
+                }
+                catch (OperationCanceledException) { throw; }
+                catch (Exception ex) when (ex is IOException or InvalidDataException
+                    or UnauthorizedAccessException or CryptographicException)
+                {
+                    // Never install or use an unverified patch. Try the full asset.
+                    if (File.Exists(stage)) File.Delete(stage);
+                    if (File.Exists(patch)) File.Delete(patch);
+                    progress?.Report(0);
+                }
             }
-            await output.FlushAsync(ct);
-            if (downloaded != release.Size ||
-                !Convert.ToHexString(hash.GetHashAndReset()).Equals(release.Sha256, StringComparison.OrdinalIgnoreCase))
-                throw new IOException("Downloaded installer failed SHA-256 verification");
-            File.Move(staging, complete, true);
+            if (!patched)
+                await DownloadVerifiedAsync(new Uri(release.Url), release.Size, release.Sha256, stage, progress, ct);
+            File.Move(stage, complete, overwrite: true);
             progress?.Report(100);
             return complete;
         }
-        finally { if (File.Exists(staging)) File.Delete(staging); }
+        finally
+        {
+            if (File.Exists(stage)) File.Delete(stage);
+            if (File.Exists(patch)) File.Delete(patch);
+        }
     }
 }
