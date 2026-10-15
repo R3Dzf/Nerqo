@@ -1,4 +1,8 @@
-plugins { id("com.android.application") }
+plugins {
+    id("com.android.application")
+    id("org.jetbrains.kotlin.android")
+    id("org.jetbrains.kotlin.plugin.compose")
+}
 android {
     namespace = "com.r3dzf.nerqo"
     compileSdk = 36
@@ -6,36 +10,46 @@ android {
         applicationId = "com.r3dzf.nerqo"
         minSdk = 26
         targetSdk = 35
-        versionCode = 3
-        versionName = "0.3.0"
+        versionCode = 4
+        versionName = "0.4.0"
     }
-    // Compile unsigned release smoke builds without the private key.
-    // Actual release signing requires all four matching environment variables.
+    buildFeatures { compose = true }
     val signingFile = System.getenv("NERQO_SIGNING_FILE")
-    val signingPassword = System.getenv("NERQO_STORE_PASSWORD")
-    val signingAlias = System.getenv("NERQO_KEY_ALIAS")
-    val signingKeyPassword = System.getenv("NERQO_KEY_PASSWORD")
-    val signingValues = listOf(signingFile, signingPassword, signingAlias, signingKeyPassword)
-    require(signingValues.all { it.isNullOrBlank() } || signingValues.all { !it.isNullOrBlank() }) {
-        "Incomplete stable Nerqo signing configuration; refusing to build."
+    val storePasswordEnv = System.getenv("NERQO_STORE_PASSWORD")
+    val aliasEnv = System.getenv("NERQO_KEY_ALIAS")
+    val keyPasswordEnv = System.getenv("NERQO_KEY_PASSWORD")
+    val credentials = listOf(signingFile, storePasswordEnv, aliasEnv, keyPasswordEnv)
+    require(credentials.all { it.isNullOrBlank() } || credentials.all { !it.isNullOrBlank() }) {
+        "Incomplete Android release signing configuration"
     }
     if (!signingFile.isNullOrBlank()) {
         signingConfigs {
             create("stableRelease") {
                 storeFile = file(signingFile)
-                storePassword = signingPassword
-                keyAlias = signingAlias
-                keyPassword = signingKeyPassword
+                storePassword = storePasswordEnv
+                keyAlias = aliasEnv
+                keyPassword = keyPasswordEnv
             }
         }
     }
     buildTypes {
         getByName("release") {
-            if (!signingFile.isNullOrBlank()) {
-                signingConfig = signingConfigs.getByName("stableRelease")
-            }
+            if (!signingFile.isNullOrBlank()) signingConfig = signingConfigs.getByName("stableRelease")
             isMinifyEnabled = false
         }
     }
-    compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+    kotlinOptions { jvmTarget = "17" }
+}
+dependencies {
+    val composeBom = platform("androidx.compose:compose-bom:2025.09.01")
+    implementation(composeBom)
+    implementation("androidx.compose.ui:ui")
+    implementation("androidx.compose.foundation:foundation")
+    implementation("androidx.compose.material3:material3")
+    implementation("androidx.activity:activity-compose:1.10.1")
+    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.9.3")
 }

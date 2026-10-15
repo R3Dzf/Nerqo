@@ -1,0 +1,51 @@
+name: Nerqo native Windows and Android preview
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - dev/native-5ghz-20261016
+  pull_request:
+    paths:
+      - 'desktop/**'
+      - 'android/**'
+      - '.github/workflows/native-preview.yml'
+permissions:
+  contents: read
+jobs:
+  windows-native:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
+      - name: Compile native WPF app
+        run: dotnet publish desktop/Nerqo.Desktop/Nerqo.Desktop.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:PublishReadyToRun=false -o dist/Windows
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Nerqo-Native-Windows-Preview
+          path: dist/Windows/**
+  android-native:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v4
+      - name: Install SDK
+        run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+      - name: Compile Compose debug APK
+        working-directory: android
+        run: gradle :app:assembleDebug --stacktrace --no-daemon
+      - name: Compile unsigned native release APK
+        working-directory: android
+        run: gradle :app:assembleRelease --no-daemon
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Nerqo-Native-Android-Debug-Preview
+          path: android/app/build/outputs/apk/debug/*.apk

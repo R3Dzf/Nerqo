@@ -1,0 +1,39 @@
+<Window x:Class="Nerqo.Desktop.MainWindow" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="Nerqo — Local sharing" Height="750" Width="1040" MinHeight="625" MinWidth="760" WindowStartupLocation="CenterScreen" Background="{StaticResource Background}" Foreground="White" FontFamily="Segoe UI">
+  <Grid Margin="30">
+    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+    <DockPanel Margin="0,0,0,25">
+      <StackPanel Orientation="Horizontal" DockPanel.Dock="Left"><Border Background="{StaticResource Accent}" CornerRadius="12" Width="50" Height="50"><TextBlock Text="↔" FontSize="29" FontWeight="Bold" Foreground="#0D342D" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border><StackPanel Margin="14,3,0,0"><TextBlock Text="Nerqo." FontSize="29" FontWeight="Bold"/><TextBlock Text="Move freely. Stay local." Foreground="{StaticResource Muted}" FontSize="12"/></StackPanel></StackPanel>
+      <TextBlock Name="StatusLabel" HorizontalAlignment="Right" VerticalAlignment="Center" Foreground="{StaticResource Accent}" Text="●  Starting local network…" FontSize="14" />
+    </DockPanel>
+    <Grid Grid.Row="1"><Grid.ColumnDefinitions><ColumnDefinition Width="1.1*"/><ColumnDefinition Width="0.9*"/></Grid.ColumnDefinitions>
+      <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"><StackPanel Margin="0,0,22,0">
+        <Border Background="{StaticResource Panel}" CornerRadius="20" Padding="22" Margin="0,0,0,16"><StackPanel>
+          <TextBlock Text="CONNECT YOUR PHONE" Foreground="{StaticResource Accent}" FontSize="12" FontWeight="Bold"/>
+          <TextBlock Text="Open Nerqo on Android. Both devices should use the same Wi-Fi or hotspot." Foreground="{StaticResource Muted}" Margin="0,12,0,18" TextWrapping="Wrap" FontSize="14" />
+          <TextBlock Text="Pairing code" Foreground="{StaticResource Muted}" FontSize="13"/>
+          <TextBlock Name="PairCodeLabel" Text="------" FontSize="42" FontWeight="Bold" Margin="0,2,0,10"/>
+          <TextBlock Name="AddressLabel" Text="Detecting available addresses…" FontSize="13" TextWrapping="Wrap" Foreground="{StaticResource Muted}"/>
+          <TextBlock Name="BandLabel" Margin="0,12,0,0" Text="Checking Wi-Fi band…" Foreground="{StaticResource Accent}" FontSize="13" />
+          <TextBlock Text="Tip: Use 5 GHz Wi-Fi or 6 GHz if supported for better throughput. Switching bands is controlled by your router/hotspot settings." Foreground="{StaticResource Muted}" TextWrapping="Wrap" FontSize="12" Margin="0,8,0,0" />
+          <Button Content="Copy pairing code" Click="CopyPairCode" Margin="0,18,0,0"/>
+        </StackPanel></Border>
+        <Border Background="{StaticResource Panel}" CornerRadius="20" Padding="22"><StackPanel>
+          <TextBlock Text="SEND TO ANDROID" Foreground="{StaticResource Accent}" FontSize="12" FontWeight="Bold" />
+          <TextBlock Text="Your paired phone will see shared files and notes here." Foreground="{StaticResource Muted}" Margin="0,10,0,12" TextWrapping="Wrap"/>
+          <Button Content="Choose file to share…" Click="ShareFile"/>
+          <TextBlock Text="Text or URL" Foreground="{StaticResource Muted}" Margin="0,12,0,6" />
+          <TextBox Name="NoteInput" Height="78" TextWrapping="Wrap" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" />
+          <Button Content="Send text / link" Click="ShareNote" Margin="0,12,0,0"/>
+        </StackPanel></Border>
+      </StackPanel></ScrollViewer>
+      <Border Grid.Column="1" Background="{StaticResource Panel}" CornerRadius="20" Padding="22">
+        <DockPanel><StackPanel DockPanel.Dock="Top"><TextBlock Text="Recent transfers" FontWeight="Bold" FontSize="21"/><TextBlock Text="Local only — nothing is uploaded to the cloud." Foreground="{StaticResource Muted}" FontSize="12" Margin="0,8,0,18"/><Button Content="Open received files" Click="OpenReceived" /></StackPanel>
+          <ListBox Name="ItemList" Background="Transparent" BorderThickness="0" Foreground="White" Margin="0,15,0,0" FontSize="14">
+            <ListBox.ItemTemplate><DataTemplate><Border BorderBrush="#3B5066" BorderThickness="0,0,0,1" Padding="4,11"><StackPanel><TextBlock Text="{Binding Content}" Foreground="White" TextTrimming="CharacterEllipsis" FontWeight="SemiBold"/><StackPanel Orientation="Horizontal" Margin="0,5,0,0"><TextBlock Text="{Binding Kind}" Foreground="{StaticResource Accent}" FontSize="12"/><TextBlock Text="  •  " Foreground="{StaticResource Muted}"/><TextBlock Text="{Binding Sender}" Foreground="{StaticResource Muted}" FontSize="12"/></StackPanel></StackPanel></Border></DataTemplate></ListBox.ItemTemplate>
+          </ListBox>
+        </DockPanel>
+      </Border>
+    </Grid>
+    <DockPanel Grid.Row="2" Margin="0,15,0,0"><TextBlock Text="Nerqo native preview  ·  Paired devices only  ·  No browser required" Foreground="{StaticResource Muted}" FontSize="12"/><TextBlock Name="FooterLabel" Text="" Foreground="{StaticResource Accent}" HorizontalAlignment="Right" FontSize="12" /></DockPanel>
+  </Grid>
+</Window>
