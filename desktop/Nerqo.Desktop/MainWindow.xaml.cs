@@ -17,6 +17,7 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         PairCodeLabel.Text = service.PairCode;
+        IdentityLabel.Text = service.PairingIdentity;
         service.Changed += () => Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(RefreshItems));
         Loaded += Start;
         Closing += (s, e) =>

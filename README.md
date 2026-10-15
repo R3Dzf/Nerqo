@@ -35,3 +35,7 @@ This is an **early preview for trusted private networks only**. PIN pairing and 
 Pending before stable release: QR pairing and advanced diagnostics, pause/folder UI, encrypted mutual authentication, Wi-Fi Direct and Bluetooth transports, native Windows delta updater and installer, and stable signed release/regression testing. The permanent Android signing certificate from `v0.3.0` must remain unchanged; private keys are never checked into Git.
 
 Legacy `app.py` and `web/` are retained temporarily for migration and historical tests; neither is part of the native Windows executable.
+
+### Encrypted native pairing preview
+
+Windows displays a 12-character secure identity beside its pairing PIN. Verify that the identical code appears in Android before entering the PIN. Android pins the entire SHA-256 certificate fingerprint; file and note requests use HTTPS. Windows stores its identity private key encrypted with current-user Windows DPAPI. This is a development preview, not a completed security audit.

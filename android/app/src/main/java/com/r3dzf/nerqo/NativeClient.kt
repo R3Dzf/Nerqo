@@ -9,6 +9,15 @@ import java.io.IOException
 import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.HttpURLConnection
+import java.net.InetSocketAddress
+import java.security.SecureRandom
+import java.security.cert.CertificateException
+import java.security.cert.X509Certificate
+import javax.net.ssl.HttpsURLConnection
+import javax.net.ssl.SSLContext
+import javax.net.ssl.SSLSocket
+import javax.net.ssl.X509TrustManager
+import java.util.concurrent.ConcurrentHashMap
 import java.net.InetAddress
 import java.net.NetworkInterface
 import java.util.Collections
@@ -17,7 +26,7 @@ import java.security.MessageDigest
 import java.util.Locale
 
 internal data class Device(val name: String, val address: String, val port: Int = 44888) {
-    val endpoint: String get() = "http://$address:$port"
+    val endpoint: String get() = "https://$address:$port"
 }
 internal data class SharedEntry(
     val id: String, val kind: String, val sender: String, val content: String,
@@ -26,6 +35,42 @@ internal data class SharedEntry(
 
 internal object NativeClient {
     private const val MAX_CHUNK = 4 * 1024 * 1024
+    private val identities = ConcurrentHashMap<String, String>()
+    fun trustIdentity(device: Device, fingerprint: String) {
+        require(fingerprint.matches(Regex("[a-f0-9]{64}"))) { "Invalid certificate fingerprint" }
+        identities["${device.address}:${device.port}"] = fingerprint
+    }
+    /** Untrusted certificate probe: sends NO HTTP data, PIN or bearer token. User must compare Windows code. */
+    fun previewIdentity(device: Device): String {
+        val probe = SSLContext.getInstance("TLS")
+        probe.init(null, arrayOf(object : X509TrustManager {
+            override fun getAcceptedIssuers(): Array<X509Certificate> = emptyArray()
+            override fun checkClientTrusted(chain: Array<X509Certificate>, authType: String) = Unit
+            override fun checkServerTrusted(chain: Array<X509Certificate>, authType: String) = Unit
+        }), SecureRandom())
+        val socket = probe.socketFactory.createSocket() as SSLSocket
+        socket.use {
+            it.soTimeout = 6000
+            it.connect(InetSocketAddress(device.address, device.port), 6000)
+            it.startHandshake()
+            val certificate = it.session.peerCertificates.firstOrNull() as? X509Certificate
+                ?: throw IOException("Windows did not present a certificate")
+            return sha(certificate.encoded)
+        }
+    }
+    private fun sslForPinnedIdentity(fingerprint: String): SSLContext {
+        val manager = object : X509TrustManager {
+            override fun getAcceptedIssuers(): Array<X509Certificate> = emptyArray()
+            override fun checkClientTrusted(chain: Array<X509Certificate>, authType: String) =
+                throw CertificateException("Client certificates not used")
+            override fun checkServerTrusted(chain: Array<X509Certificate>, authType: String) {
+                if (chain.isEmpty() || sha(chain[0].encoded) != fingerprint)
+                    throw CertificateException("Windows identity changed. Re-pair and compare identity code.")
+                chain[0].checkValidity()
+            }
+        }
+        return SSLContext.getInstance("TLS").apply { init(null, arrayOf(manager), SecureRandom()) }
+    }
     private fun sha(bytes: ByteArray): String = MessageDigest.getInstance("SHA-256").digest(bytes)
         .joinToString("") { "%02x".format(Locale.ROOT, it.toInt() and 0xff) }
 
@@ -67,7 +112,16 @@ internal object NativeClient {
         return found.values.toList()
     }
     private fun connect(url: String, method: String, token: String? = null): HttpURLConnection {
-        val conn = URL(url).openConnection() as HttpURLConnection
+        val parsed = URL(url)
+        if (parsed.protocol != "https") throw IOException("Unencrypted transfer forbidden")
+        val fingerprint = identities["${parsed.host}:${parsed.port}"]
+            ?: throw IOException("Verify the Windows security code first")
+        val conn = parsed.openConnection() as HttpsURLConnection
+        conn.sslSocketFactory = sslForPinnedIdentity(fingerprint).socketFactory
+        // The pinned SHA-256 fingerprint authenticates the device even with a local IP address.
+        conn.hostnameVerifier = javax.net.ssl.HostnameVerifier { _, session ->
+            try { sha(session.peerCertificates[0].encoded) == fingerprint } catch (_: Exception) { false }
+        }
         conn.requestMethod = method
         conn.connectTimeout = 7000
         conn.readTimeout = 30000

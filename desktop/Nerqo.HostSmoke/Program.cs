@@ -6,7 +6,10 @@ using System.Text.Json;
 
 await using var host = new LanHost();
 await host.StartAsync();
-using var client = new HttpClient { BaseAddress = new Uri("http://127.0.0.1:44888"), Timeout = TimeSpan.FromSeconds(20) };
+await using (var secondInstance = new LanHost())
+    if (host.ServerFingerprint != secondInstance.ServerFingerprint) throw new Exception("LAN identity unexpectedly changed");
+using var handler = new HttpClientHandler { ServerCertificateCustomValidationCallback = (_, cert, _, _) => cert != null && cert.GetCertHashString(HashAlgorithmName.SHA256).Equals(host.ServerFingerprint, StringComparison.OrdinalIgnoreCase) };
+using var client = new HttpClient(handler) { BaseAddress = new Uri("https://127.0.0.1:44888"), Timeout = TimeSpan.FromSeconds(20) };
 var status = await client.GetFromJsonAsync<JsonElement>("/api/status");
 if (status.GetProperty("port").GetInt32() != 44888) throw new Exception("Status endpoint failed");
 if ((await client.GetAsync("/api/items")).StatusCode != System.Net.HttpStatusCode.Unauthorized) throw new Exception("Unpaired access was permitted");

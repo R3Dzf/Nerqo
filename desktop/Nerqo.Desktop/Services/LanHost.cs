@@ -4,6 +4,7 @@ using System.Net;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -56,6 +57,9 @@ public sealed class LanHost : IAsyncDisposable
     private readonly ConcurrentDictionary<string, Queue<DateTimeOffset>> attempts = new();
     private readonly string root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Nerqo");
     private PersistedData state = new();
+    private readonly X509Certificate2 tlsCertificate;
+    public string ServerFingerprint => tlsCertificate.GetCertHashString(HashAlgorithmName.SHA256).ToLowerInvariant();
+    public string PairingIdentity => ServerFingerprint[..12].ToUpperInvariant();
     private WebApplication? app;
     private CancellationTokenSource? discoveryCancellation;
     private Task? discoveryTask;
@@ -74,6 +78,7 @@ public sealed class LanHost : IAsyncDisposable
         Directory.CreateDirectory(root);
         Directory.CreateDirectory(ReceivedDirectory);
         Directory.CreateDirectory(StorageDirectory);
+        tlsCertificate = LanIdentity.LoadOrCreate(root);
         string data = Path.Combine(root, "state.json");
         if (File.Exists(data))
             try { state = JsonSerializer.Deserialize<PersistedData>(File.ReadAllText(data)) ?? new(); }
@@ -150,8 +155,11 @@ public sealed class LanHost : IAsyncDisposable
     {
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions { Args = Array.Empty<string>() });
         builder.Logging.ClearProviders();
-        builder.WebHost.UseUrls($"http://0.0.0.0:{Port}");
-        builder.WebHost.ConfigureKestrel(o => o.Limits.MaxRequestBodySize = ChunkLimit + 65536);
+        builder.WebHost.ConfigureKestrel(o =>
+        {
+            o.Limits.MaxRequestBodySize = ChunkLimit + 65536;
+            o.ListenAnyIP(Port, endpoint => endpoint.UseHttps(tlsCertificate));
+        });
         app = builder.Build();
         app.Use(async (ctx, next) =>
         {
@@ -311,5 +319,6 @@ public sealed class LanHost : IAsyncDisposable
     {
         if (discoveryCancellation != null) { await discoveryCancellation.CancelAsync(); if (discoveryTask != null) await discoveryTask; discoveryCancellation.Dispose(); }
         if (app != null) await app.DisposeAsync();
+        tlsCertificate.Dispose();
     }
 }

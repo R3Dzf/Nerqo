@@ -8,7 +8,7 @@ Branch: `dev/native-5ghz-20261016`. This preview is **not a production release**
 - Android: Kotlin + Jetpack Compose, no WebView. Sends text, links, single/multiple files using the document picker, receives files using the system Save dialog. Automatic UDP LAN discovery + IP fallback.
 - Same-network and hotspot use the same LAN interface, no WAN service. Both clients must be on the same subnet; AP/client isolation and Windows Firewall can prevent discovery or connections.
 - UDP broadcast discovery: port `44889`, request `NERQO_DISCOVER_V1`. Replies include device name, port 44888, and (where detectable) Wi-Fi band. Does not reveal pairing PIN.
-- TCP transport: HTTP on `44888`, paired bearer token, 4 MiB streaming chunks, SHA-256 chunk/file verification, resumable upload state. Windows-origin files are staged inside app data and mobile polls the shared item list. Android-origin files are saved in Windows Received. **Not TLS encrypted yet:** trusted private networks only.
+- TCP transport: HTTPS/TLS on `44888`, paired bearer token, 4 MiB streaming chunks, SHA-256 chunk/file verification, resumable upload state. Windows-origin files are staged inside app data and mobile polls the shared item list. Android-origin files are saved in Windows Received. **TLS encrypted after verified pairing:** Android checks the full pinned certificate fingerprint, but independent security auditing is pending.
 
 ## 5 GHz priority — the physical layer
 
@@ -26,7 +26,7 @@ The actual MB/s is limited by negotiated Wi-Fi PHY, airtime contention, AP hardw
 | 04 Discover and pairing | Initial implementation | Broadcast, local IP fallback, rate limited pairing; QR and DNS-SD still pending |
 | 05 Files, resume, integrity | Initial implementation | 4 MiB chunks, SHA-256, 2 TB policy, crash recovery; pause/resume UI and folders pending |
 | 06 Text and links | Initial implementation | Android Share intent, Windows UI, copy; clipboard opt-in pending |
-| 07 End-to-end security | Not complete | Needs authenticated key agreement, encrypted file transport and revocation UI before public network use |
+| 07 Encrypted transport | In progress | TLS + visual fingerprint verification; peer revocation and adversarial security tests pending |
 | 08 Hotspot / Wi-Fi Direct / Bluetooth | Partial | Android local-only hotspot started where supported; Wi-Fi Direct and Bluetooth transports not built |
 | 09 Releases and Delta | Not complete | Keep prior release untouched; native Windows updater/installer, stable Android signed release, delta pipeline adaptation require testing |
 

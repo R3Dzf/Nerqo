@@ -54,6 +54,8 @@ class MainActivity : ComponentActivity() {
     private var manualIp by mutableStateOf("")
     private var pinText by mutableStateOf("")
     private var showPair by mutableStateOf(false)
+    private var previewFingerprint by mutableStateOf("")
+    private var fingerprintConfirmed by mutableStateOf(false)
     private var hotspotText by mutableStateOf("")
     private var hotspotReservation: WifiManager.LocalOnlyHotspotReservation? = null
     private var pendingDownload: SharedEntry? = null
@@ -65,6 +67,9 @@ class MainActivity : ComponentActivity() {
         if (isPrivateIPv4(host)) {
             device = Device(prefs.getString("name", "Windows PC") ?: "Windows PC", host, storedPort)
             token = prefs.getString("token_$host", null)
+            val storedCertificate = prefs.getString("cert_${host}:$storedPort", null)
+            if (storedCertificate != null) NativeClient.trustIdentity(device!!, storedCertificate)
+            else token = null
         }
         bindLocalNetwork()
         receiveShare(intent)
@@ -119,17 +124,39 @@ class MainActivity : ComponentActivity() {
         }
     }
     private fun select(found: Device) {
-        device = found; token = prefs.getString("token_${found.address}", null)
+        device = found
+        previewFingerprint = ""
+        fingerprintConfirmed = false
         prefs.edit().putString("host", found.address).putInt("port", found.port).putString("name", found.name).apply()
-        if (token != null) refresh() else showPair = true
+        task {
+            val discovered = NativeClient.previewIdentity(found)
+            val stored = prefs.getString("cert_${found.address}:${found.port}", null)
+            if (stored != null && stored == discovered) {
+                NativeClient.trustIdentity(found, stored)
+                val access = prefs.getString("token_${found.address}", null)
+                val fresh = if (access != null) NativeClient.list(found, access) else emptyList()
+                runOnUiThread { token = access; entries = fresh; message = "Verified secure Windows connection"; if (access == null) { previewFingerprint = discovered; showPair = true } }
+            } else {
+                runOnUiThread {
+                    token = null
+                    previewFingerprint = discovered
+                    showPair = true
+                    message = if (stored == null) "Confirm the Windows identity before first pairing" else "Windows identity changed! Check before pairing again."
+                }
+            }
+        }
     }
     private fun pair() {
         val current = device ?: return
-        if (!pinText.matches(Regex("[0-9]{6}"))) { message = "Enter the 6-digit code displayed on Windows"; return }
+        if (!pinText.matches(Regex("[0-9]{6}"))) { message = "Enter the six-digit code shown on Windows"; return }
+        if (previewFingerprint.length != 64 || !fingerprintConfirmed) { message = "Verify the Windows identity first"; return }
+        val confirmedIdentity = previewFingerprint
         task {
+            NativeClient.trustIdentity(current, confirmedIdentity)
             val saved = NativeClient.pair(current, pinText)
-            prefs.edit().putString("token_${current.address}", saved).apply()
-            runOnUiThread { token = saved; showPair = false; pinText = ""; message = "Paired with ${current.name}" }
+            prefs.edit().putString("cert_${current.address}:${current.port}", confirmedIdentity)
+                .putString("token_${current.address}", saved).apply()
+            runOnUiThread { token = saved; showPair = false; pinText = ""; fingerprintConfirmed = false; message = "Securely paired with ${current.name}" }
             val fresh = NativeClient.list(current, saved)
             runOnUiThread { entries = fresh }
         }
@@ -258,9 +285,20 @@ class MainActivity : ComponentActivity() {
                 if (device != null && token != null && !busy) refresh()
             }
         }
-        if (showPair) AlertDialog(onDismissRequest = { showPair = false }, title = { Text("Pair with Windows") },
-            text = { Column { Text("Enter the code shown inside the Nerqo Windows app."); Spacer(Modifier.height(12.dp)); OutlinedTextField(value = pinText, onValueChange = { pinText = it.take(6) }, label = { Text("6-digit pairing code") }, singleLine = true) } },
-            confirmButton = { Button(onClick = ::pair, enabled = !busy) { Text("Pair securely") } }, dismissButton = { TextButton(onClick = { showPair = false }) { Text("Cancel") } })
+        if (showPair) AlertDialog(onDismissRequest = { showPair = false }, title = { Text("Verify Windows & pair") },
+            text = { Column {
+                Text("Compare this code with the secure identity displayed in Nerqo on Windows:")
+                Spacer(Modifier.height(10.dp))
+                Text(previewFingerprint.take(12).uppercase(), fontWeight = FontWeight.Bold, fontSize = 23.sp)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(checked = fingerprintConfirmed, onCheckedChange = { fingerprintConfirmed = it })
+                    Text("Identity code matches on both screens", fontSize = 12.sp)
+                }
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(value = pinText, onValueChange = { pinText = it.filter(Char::isDigit).take(6) }, label = { Text("6-digit pairing code") }, singleLine = true)
+            } },
+            confirmButton = { Button(onClick = ::pair, enabled = !busy && fingerprintConfirmed && previewFingerprint.length == 64 && pinText.length == 6) { Text("Pair securely") } },
+            dismissButton = { TextButton(onClick = { showPair = false }) { Text("Cancel") } })
         MaterialTheme(colorScheme = palette) {
             Surface(modifier = Modifier.fillMaxSize(), color = bg) {
                 Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp)) {
