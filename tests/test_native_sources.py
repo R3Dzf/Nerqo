@@ -9,6 +9,7 @@ class NativeSources(unittest.TestCase):
         self.assertIn('<OutputType>WinExe</OutputType>',project)
         self.assertIn('<UseWPF>true</UseWPF>',project)
         self.assertIn('QRCoder',project)
+        self.assertIn('Refresh network and QR', (ROOT/'desktop/Nerqo.Desktop/MainWindow.xaml').read_text())
         code=(ROOT/'desktop/Nerqo.Desktop/MainWindow.xaml.cs').read_text()
         self.assertNotIn('WebView',code)
         self.assertNotIn('webbrowser.open',code)

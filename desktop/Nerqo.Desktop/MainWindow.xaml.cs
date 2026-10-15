@@ -35,9 +35,7 @@ public partial class MainWindow : Window
         {
             await service.StartAsync();
             StatusLabel.Text = "●  Ready on local network";
-            AddressLabel.Text = service.Addresses.Length == 0 ? "Connect to Wi-Fi or a mobile hotspot." : "Local addresses: " + string.Join("  ·  ", service.Addresses);
-            BandLabel.Text = "Wi-Fi link: " + await Task.Run(WifiInspector.GetBand) + "  |  Prefer 5 GHz / 6 GHz";
-            ShowPairingQr();
+            await UpdateNetworkAndQrAsync();
             SetupTray(); RefreshItems();
         }
         catch (Exception ex)
@@ -47,10 +45,22 @@ public partial class MainWindow : Window
             MessageBox.Show($"Nerqo couldn't start its local receiver.\n\n{ex.Message}\n\nCheck Windows Firewall and make sure no previous instance is running.", "Nerqo connection", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
     }
+    private async void RefreshNetworkAndQr(object sender, RoutedEventArgs e)
+    {
+        try { await UpdateNetworkAndQrAsync(); FooterLabel.Text = "Network details and QR refreshed"; }
+        catch (Exception ex) { FooterLabel.Text = "Network refresh failed"; MessageBox.Show(ex.Message, "Nerqo network", MessageBoxButton.OK, MessageBoxImage.Warning); }
+    }
+    private async Task UpdateNetworkAndQrAsync()
+    {
+        var addresses = service.Addresses;
+        AddressLabel.Text = addresses.Length == 0 ? "Connect Windows to Wi-Fi or a phone hotspot, then tap Refresh." : "Local addresses: " + string.Join("  ·  ", addresses);
+        BandLabel.Text = "Wi-Fi link: " + await Task.Run(WifiInspector.GetBand) + "  |  5 GHz / 6 GHz recommended";
+        ShowPairingQr();
+    }
     private void ShowPairingQr()
     {
         var addresses = service.Addresses.Take(6).ToArray();
-        if (addresses.Length == 0) { PairQrImage.ToolTip = "Connect Windows to Wi-Fi and reopen Nerqo"; return; }
+        if (addresses.Length == 0) { PairQrImage.Source = null; PairQrImage.ToolTip = "Connect Windows to Wi-Fi then refresh the QR"; return; }
         string payload = JsonSerializer.Serialize(new
         {
             nerqo = 1, name = Environment.MachineName, addresses, port = LanHost.Port,

@@ -45,3 +45,7 @@ The actual MB/s is limited by negotiated Wi-Fi PHY, airtime contention, AP hardw
 ### Not yet complete
 
 Neither Wi-Fi Direct nor Bluetooth transports, end-to-end encryption, QR pairing, large-folder layout, native Windows delta updater nor a signed production installer are present in this preview. No speed guarantee or claim of real-device testing is made.
+
+### Changed Wi-Fi / hotspot after launch
+
+Use **Refresh network and QR** in the Windows app after connecting to another Wi-Fi SSID or your phone hotspot. This recalculates the local addresses and regenerates the QR with the current addresses and the same pinned certificate identity; no restart, browser, terminal or Internet is required. When network isolation or firewall rules block incoming TCP 44888, the QR cannot bypass that restriction.
