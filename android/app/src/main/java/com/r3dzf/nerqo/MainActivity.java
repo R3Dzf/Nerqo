@@ -87,6 +87,7 @@ public final class MainActivity extends Activity {
         hostInput.setText(getPreferences(MODE_PRIVATE).getString("lastip",""));
         body.addView(hostInput,new LinearLayout.LayoutParams(-1,dp(60)));
         Button button=new Button(this);button.setText("Connect to laptop");button.setAllCaps(false);body.addView(button);button.setOnClickListener(v->connect(hostInput.getText().toString()));
+        Button checkUpdates=new Button(this);checkUpdates.setText("Check for app updates");checkUpdates.setAllCaps(false);body.addView(checkUpdates);checkUpdates.setOnClickListener(v->AppUpdater.check(this));
         Button scan=new Button(this);scan.setText("Find laptop on local Wi-Fi");scan.setAllCaps(false);body.addView(scan);scan.setOnClickListener(v->discover(scan));
         TextView hint=text("The laptop must be running Nerqo. Enter the 6-digit PIN shown on the laptop after connecting.",13,false);
         hint.setTextColor(Color.rgb(148,169,183));hint.setPadding(0,dp(20),0,0);body.addView(hint);
@@ -130,8 +131,8 @@ public final class MainActivity extends Activity {
         initRoot();
         Toolbar bar=new Toolbar(this);bar.setTitle("Nerqo");bar.setTitleTextColor(Color.WHITE);bar.setBackgroundColor(Color.rgb(16,23,34));
         root.addView(bar,new LinearLayout.LayoutParams(-1,dp(48)));
-        bar.getMenu().add(0,1,0,"Change laptop");bar.getMenu().add(0,2,1,"Refresh");
-        bar.setOnMenuItemClickListener(item->{if(item.getItemId()==1){hostUrl="";getPreferences(MODE_PRIVATE).edit().remove("host").apply();showConnect();return true;}if(item.getItemId()==2){web.reload();return true;}return false;});
+        bar.getMenu().add(0,1,0,"Change laptop");bar.getMenu().add(0,2,1,"Refresh");bar.getMenu().add(0,3,2,"Check for updates");
+        bar.setOnMenuItemClickListener(item->{if(item.getItemId()==1){hostUrl="";getPreferences(MODE_PRIVATE).edit().remove("host").apply();showConnect();return true;}if(item.getItemId()==2){web.reload();return true;}if(item.getItemId()==3){AppUpdater.check(this);return true;}return false;});
         web=new WebView(this);root.addView(web,new LinearLayout.LayoutParams(-1,0,1));
         web.setBackgroundColor(Color.rgb(12,17,25));
         web.getSettings().setJavaScriptEnabled(true);web.getSettings().setDomStorageEnabled(true);

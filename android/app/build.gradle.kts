@@ -6,8 +6,25 @@ android {
         applicationId = "com.r3dzf.nerqo"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.2.0"
+    }
+    signingConfigs {
+        create("stableRelease") {
+            val keystore = System.getenv("NERQO_SIGNING_FILE")
+            if (!keystore.isNullOrBlank()) {
+                storeFile = file(keystore)
+                storePassword = System.getenv("NERQO_STORE_PASSWORD")
+                keyAlias = System.getenv("NERQO_KEY_ALIAS")
+                keyPassword = System.getenv("NERQO_KEY_PASSWORD")
+            }
+        }
+    }
+    buildTypes {
+        getByName("release") {
+            signingConfig = signingConfigs.getByName("stableRelease")
+            isMinifyEnabled = false
+        }
     }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
 }

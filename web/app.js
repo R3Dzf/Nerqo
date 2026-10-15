@@ -30,15 +30,47 @@ try{localStorage.setItem(key(job),transfer.id)}catch{}
 let offset=transfer.offset;while(offset<job.file.size){if(stopped){job.state='Paused';renderQueue();return false}const end=Math.min(offset+CHUNK,job.file.size);const chunk=job.file.slice(offset,end);job.state=`Sending ${bytes(offset)} / ${bytes(job.file.size)}`;renderQueue();const resp=await fetch(`/api/transfers/${transfer.id}/chunk`,{method:'PUT',headers:{'Content-Type':'application/octet-stream','X-Offset':String(offset)},body:chunk});let result;try{result=await resp.json()}catch{throw new Error('Connection interrupted')};if(!resp.ok)throw new Error(result.error || 'Upload error');offset=result.offset;job.progress=offset/job.file.size;renderQueue()}
 await post(`/api/transfers/${transfer.id}/finish`,{});try{localStorage.removeItem(key(job))}catch{};job.progress=1;job.state='Complete';renderQueue();return true}
 async function processQueue(){if(running)return;running=true;try{for(const job of queue){if(stopped)break;if(job.state==='Complete')continue;try{const done=await upload(job);if(!done)break;}catch(e){job.state='Failed: '+e.message;stopped=true;$('stopQueue').classList.add('hidden');$('resumeQueue').classList.remove('hidden');renderQueue();toast(`${job.name}: ${e.message}`,true);break}}}finally{running=false;if(queue.every(j=>j.state==='Complete')){toast('Files ready on both devices');loadItems();}}}
+async function updateCheck(){
+  const btn=$('checkUpdates');btn.disabled=true;
+  $('updateMessage').textContent='Checking GitHub Releases…';
+  try {
+    const offer=await api('/api/updates/check');
+    if(offer.status==='available'){
+      const size=(offer.download_bytes/1048576).toFixed(1), full=(offer.full_bytes/1048576).toFixed(1);
+      $('updateMessage').textContent=`Nerqo ${offer.version} • ${offer.mode==='delta'?'Delta':'Full'} update • ${size} MB instead of ${full} MB. ${offer.install_supported?'':'Install from a packaged Windows EXE to enable self-update.'}`;
+      $('prepareUpdate').classList.toggle('hidden',!offer.install_supported);
+    } else {$('updateMessage').textContent=offer.status==='error'?offer.error:'You are running the latest version.';$('prepareUpdate').classList.add('hidden');}
+  } catch(e){$('updateMessage').textContent=e.message}
+  finally{btn.disabled=false}
+}
+async function updatePoll(){
+  try{
+    const s=await api('/api/updates/status');
+    if(s.status==='downloading'){
+      const pc=s.total?Math.round(s.received*100/s.total):0;
+      $('updateProgress').classList.remove('hidden');$('updateProgressFill').style.width=`${pc}%`;
+      $('updateMessage').textContent=`Downloading and verifying update… ${pc}%`;
+      setTimeout(updatePoll,750);
+    }else if(s.status==='ready'){
+      $('updateProgress').classList.add('hidden');$('updateMessage').textContent=`Verified Nerqo ${s.version}. Ready to install.`;
+      $('installUpdate').classList.remove('hidden');
+    } else if(s.status==='error'){
+      $('updateMessage').textContent=s.error;$('updateProgress').classList.add('hidden');
+    } else {$('updateMessage').textContent=s.status}
+  }catch(e){$('updateMessage').textContent=e.message}
+}
 function setup(){document.querySelectorAll('.nav-item').forEach(el=>el.addEventListener('click',()=>view(el.dataset.view)));$('pickFiles').addEventListener('click',()=>$('filesInput').click());$('pickFolder').addEventListener('click',()=>$('folderInput').click());$('filesInput').addEventListener('change',e=>{pick(e.target.files);e.target.value=''});$('folderInput').addEventListener('change',e=>{pick(e.target.files);e.target.value=''});
 const drop=$('dropZone');drop.addEventListener('dragover',e=>{e.preventDefault();drop.classList.add('drag')});drop.addEventListener('dragleave',()=>drop.classList.remove('drag'));drop.addEventListener('drop',e=>{e.preventDefault();drop.classList.remove('drag');pick(e.dataTransfer.files)});
 document.querySelectorAll('.type-tab').forEach(el=>el.addEventListener('click',()=>{mode=el.dataset.kind;document.querySelectorAll('.type-tab').forEach(b=>b.classList.toggle('active',b===el));$('noteContent').placeholder=mode==='link'?'https://example.com':'Type anything to share…';$('sendNote').firstChild.textContent=mode==='link'?'Send link ':'Send text '}));$('sendNote').addEventListener('click',async()=>{let content=$('noteContent').value.trim();if(!content)return toast('Write something first',true);const btn=$('sendNote');btn.disabled=true;try{await post('/api/items',{kind:mode,content});$('noteContent').value='';toast('Sent to shared items');await loadItems()}catch(e){toast(e.message,true)}finally{btn.disabled=false}});
 $('pairForm').addEventListener('submit',async e=>{e.preventDefault();$('pairStatus').textContent='Connecting…';try{await post('/api/pair',{pin:$('pinInput').value.trim(),name:$('phoneName').value.trim()});$('pairStatus').textContent='';await updateStatus();await loadItems();toast('Device connected')}catch(err){$('pairStatus').textContent=err.message}});
 $('stopQueue').addEventListener('click',()=>{stopped=true;$('stopQueue').classList.add('hidden');$('resumeQueue').classList.remove('hidden')});$('resumeQueue').addEventListener('click',()=>{stopped=false;$('resumeQueue').classList.add('hidden');$('stopQueue').classList.remove('hidden');processQueue()});$('refresh').addEventListener('click',loadItems);
 $('revoke').addEventListener('click',async()=>{if(!confirm('Revoke access for all phones and change the code?'))return;try{await post('/api/reset',{});await updateStatus();toast('All paired devices disconnected')}catch(e){toast(e.message,true)}});
+$('checkUpdates').addEventListener('click',updateCheck);
+$('prepareUpdate').addEventListener('click',async()=>{try{await post('/api/updates/prepare',{});$('prepareUpdate').classList.add('hidden');updatePoll()}catch(e){$('updateMessage').textContent=e.message}});
+$('installUpdate').addEventListener('click',async()=>{if(!confirm('Install the verified update and restart Nerqo?'))return;try{await post('/api/updates/install',{});$('updateMessage').textContent='Installing update. Nerqo will restart automatically.';$('installUpdate').classList.add('hidden')}catch(e){$('updateMessage').textContent=e.message}});
 $('themeToggle').addEventListener('click',()=>{const light=document.documentElement.classList.toggle('light');localStorage.setItem('theme',light?'light':'dark')});try{if(localStorage.getItem('theme')==='light')document.documentElement.classList.add('light')}catch{}
 const search=new URLSearchParams(location.search);const draft=search.get('share');if(draft){$('noteContent').value=draft;if(!/^https?:\/\//i.test(draft))document.querySelector('[data-kind="text"]').click()}
 }
-async function init(){setup();await updateStatus();if(status?.authorized)await loadItems();if(!status?.local) {$('phoneName').value=/(Android)/i.test(navigator.userAgent)?'Android phone':'Other device'}
+async function init(){setup();await updateStatus();if(status?.authorized)await loadItems();$('updatePanel').classList.toggle('hidden',!status?.local);if(!status?.local) {$('phoneName').value=/(Android)/i.test(navigator.userAgent)?'Android phone':'Other device'}
 setInterval(async()=>{await updateStatus();if(status?.authorized)await loadItems()},4000)}
 document.addEventListener('DOMContentLoaded',init);

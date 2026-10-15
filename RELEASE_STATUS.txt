@@ -1,25 +1,20 @@
-Nerqo v0.1.0 — LOCAL OFFLINE TRANSFER RELEASE CANDIDATE
-Build date: 2026-10-15
+Nerqo v0.2.0 — DELTA UPDATE INTEGRATION (source + CI)
 
-TESTED IN THIS ENVIRONMENT:
-- Python syntax compilation
-- JavaScript syntax using Node.js v22
-- Python unit/integration HTTP tests (9 tests passed)
-- Pair/revoke session flow, URL/text creation, chunked file transfer,
-  resume, cross-device simulated loopback access, Range downloads,
-  invalid path rejection and host-only delete.
+IMPLEMENTED:
+- NRQDEL01 portable rsync-style binary delta codec (Windows Python + Android Java).
+- SHA-256 checks for base, downloaded asset and final reconstructed binary.
+- Windows packaged EXE: opt-in Check -> Download -> Install and restart, with rollback copy.
+- Android native app: opt-in update check, delta/full APK, Android installer prompt.
+- GitHub tag release pipeline publishes Windows EXE, stable-signed Android APK,
+  full assets, optional smaller-than-90%-full deltas and update-manifest.json.
+- No Internet required for Nerqo LAN file transfer; only checking/downloading app updates needs Internet.
 
-NOT TESTED / NOT PROVIDED AS BINARIES:
-- Android APK: Android SDK not available here; native source and build workflow included.
-- Windows EXE: no Windows build environment; launch directly via Start-Nerqo.bat
-  and build EXE using included GitHub Actions workflow.
-- Actual laptop/phone LAN or hotspot transfer: requires two physical devices.
-- Full browser UI regression: automated headless browser blocked by container policy.
-
-NOT YET IMPLEMENTED:
-- Wi-Fi Direct peer creation
-- Bluetooth transport
-- Automatic hotspot creation
-- Authenticated TLS / E2EE
-- Native background clipboard synchronization
-- Native Android-to-Android or independent Android host mode
+LIMITATIONS:
+- Android release publishing requires 4 GitHub Actions signing secrets using ONE
+  securely backed-up stable keystore (see docs/UPDATES.md). Never commit key.
+- Windows EXE update mechanism assumes installed app's folder is writable.
+- Windows EXE has no Authenticode publisher signature; see security notes.
+- v0.1.0 applications cannot self-update because they had no update client; from
+  v0.2.0 onward, future releases can use delta updates if old binaries match.
+- End-to-end upgrade smoke tests on real Android + Windows devices are still required.
+- Wi-Fi Direct, Bluetooth and encrypted LAN transport are separate roadmap items.

@@ -9,7 +9,7 @@ An open, local-first sharing app for **Windows & Android**. Send files, links, a
 
 Transfer **files, multiple files/folders, web links and plain text** over a local Wi-Fi network. No cloud, no accounts, and no Internet required when the two devices are already on the same Wi-Fi network or phone hotspot.
 
-> **Current release: v0.1.0 (working LAN prototype, not production hardened).** The tested Python host and mobile browser are usable today. An Android WebView companion application is included as source and has a CI build configuration; the APK must be compiled and tested on a real device. This version **does not** offer Bluetooth, Wi-Fi Direct, automatic hotspot creation, LAN encryption or background Android clipboard synchronization.
+> **Current code: v0.2.0 (working LAN prototype plus opt-in delta update implementation, not production hardened).** The tested Python host and mobile browser are usable today. An Android WebView companion application is included as source and has a CI build configuration; the APK must be compiled and tested on a real device. This version **does not** offer Bluetooth, Wi-Fi Direct, automatic hotspot creation, LAN encryption or background Android clipboard synchronization.
 
 ## Start on Windows
 
@@ -62,6 +62,30 @@ py -3 app.py --no-browser
 python -m unittest discover -s tests -v
 ```
 
+## Delta updates (Windows + Android)
+
+Nerqo 0.2.0 includes an optional shared binary-delta updater. Local file sharing
+**does not need Internet**, but checking GitHub Releases for a newer application
+does. Delta packages are only selected when the locally installed base binary
+matches the expected SHA-256 and the patch is at least 10% smaller than the
+full update. Otherwise the official full binary is downloaded. The
+reconstructed EXE/APK is verified before installation.
+
+- **Windows:** In the local desktop interface, open **Connect → Check for updates**.
+  On the packaged EXE, choose **Download update**, then **Install & restart**.
+  Self-replacement is not offered when running raw Python source.
+- **Android APK:** Open **Check for app updates** on the connection screen or
+  **Check for updates** in the native menu. Confirm the Android package installer;
+  the APK must use the SAME signing certificate as the installed app.
+- **Publishing releases:** See [docs/UPDATES.md](docs/UPDATES.md) for signing,
+  release tags, manifest generation and troubleshooting. Requires an Android
+  signing keystore in Actions secrets, never in the repository.
+
+**A v0.1.0 installation has no self-update client.** Upgrade to a consistently
+signed v0.2.0 package manually once, then later matching releases can use delta.
+No official signed production release has been published merely by merging source.
+Windows binaries are SHA-256-verified but not Authenticode-signed.
+
 ## Roadmap to 1.0
 
 - Authenticated TLS with pinned device certificates / E2EE, key rotation.
@@ -70,7 +94,7 @@ python -m unittest discover -s tests -v
 - Automated hotspot setup where OS policies allow it.
 - Clipboard sync with opt-in and sensitive content filters.
 - One-click folder export preserving structure.
-- App installers, automatic updates, real Windows 11 / Android device testing.
+- App installers, stable signed distribution, real Windows 11 / Android device testing.
 
 No paid services or hosted infrastructure are required.
 

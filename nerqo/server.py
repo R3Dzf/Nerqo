@@ -18,6 +18,8 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from .core import Store, AppError, CHUNK_LIMIT
+from .version import VERSION
+from .update import updater, UpdateError
 
 BASE = Path(__file__).resolve().parent.parent
 WEB = BASE / 'web'
@@ -133,7 +135,7 @@ class Handler(BaseHTTPRequestHandler):
         if self.command == 'GET' and path == '/api/status':
             return self._json(200, {'name':self.server.device_name,'authorized':bool(self._client()),
                 'local':self._is_local(), 'pin':self.server.pin if self._is_local() else None,
-                'version':'0.1.0', 'port':self.server.server_port, 'addresses':local_addresses() if self._is_local() else []})
+                'version':VERSION, 'port':self.server.server_port, 'addresses':local_addresses() if self._is_local() else []})
         if self.command == 'POST' and path == '/api/pair':
             data = self._payload()
             ip = self.client_address[0]
@@ -151,6 +153,25 @@ class Handler(BaseHTTPRequestHandler):
             with ATTEMPT_LOCK: ATTEMPTS.pop(ip,None)
             # HttpOnly cookie lets native downloads work without loading entire files into memory.
             return self._json(200,{'ok':True}, {'Set-Cookie':f'nerqo_session={token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=2592000'})
+        if path.startswith('/api/updates'):
+            if not self._is_local(): raise AppError('Windows host only', 403)
+            if self.command == 'GET' and path == '/api/updates/check':
+                return self._json(200,updater.check())
+            if self.command == 'GET' and path == '/api/updates/status':
+                return self._json(200,updater.status())
+            if self.command == 'POST' and path == '/api/updates/prepare':
+                self._body(1024)
+                try:updater.start()
+                except UpdateError as e:raise AppError(str(e),409)
+                return self._json(202,updater.status())
+            if self.command == 'POST' and path == '/api/updates/install':
+                self._body(1024)
+                try:updater.install()
+                except UpdateError as e:raise AppError(str(e),409)
+                # Give HTTP response time to flush before stopping the host.
+                threading.Timer(.6, self.server.shutdown).start()
+                return self._json(202,{'status':'installing'})
+            raise AppError('Not found',404)
         if self.command == 'GET' and path == '/api/items':
             self._authorized()
             return self._json(200,{'items':self.server.store.all_items()})
