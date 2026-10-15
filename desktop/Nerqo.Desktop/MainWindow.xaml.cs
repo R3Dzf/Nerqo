@@ -131,5 +131,33 @@ public partial class MainWindow : Window
         try { service.ShareNote(NoteInput.Text); NoteInput.Clear(); FooterLabel.Text = "Sent to paired devices"; }
         catch (Exception ex) { MessageBox.Show(ex.Message, "Invalid message", MessageBoxButton.OK, MessageBoxImage.Warning); }
     }
+    private async void CheckForUpdates(object sender, RoutedEventArgs e)
+    {
+        CheckUpdatesButton.IsEnabled = false;
+        try
+        {
+            FooterLabel.Text = "Checking for a stable Windows update…";
+            var release = await NativeUpdateService.CheckAsync(CancellationToken.None);
+            if (release == null)
+            {
+                FooterLabel.Text = "No newer stable Windows update available";
+                MessageBox.Show("You have the latest eligible Nerqo Windows version. Offline file transfer continues to work without internet.", "Nerqo updates", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+            if (MessageBox.Show($"Nerqo {release.Version} is available.\n\nDownload verified Windows installer ({release.Size / 1048576.0:0.0} MB)? Your files and paired devices will be preserved.\n\nUpdates require internet. File transfers do not.", "Nerqo updates", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
+                return;
+            var progress = new Progress<int>(percent => FooterLabel.Text = $"Downloading Windows update: {percent}%");
+            var installer = await NativeUpdateService.DownloadAsync(release, progress, CancellationToken.None);
+            FooterLabel.Text = "Update downloaded and SHA-256 verified";
+            if (MessageBox.Show("The download passed the SHA-256 check. Launch Windows setup? Windows may warn because the installer does not yet have a trusted Authenticode signature.", "Install Nerqo", MessageBoxButton.YesNo, MessageBoxImage.Warning) == MessageBoxResult.Yes)
+                Process.Start(new ProcessStartInfo(installer) { UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            FooterLabel.Text = "Update check or download failed";
+            MessageBox.Show(ex.Message, "Nerqo updates", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+        finally { CheckUpdatesButton.IsEnabled = true; }
+    }
     private void OpenReceived(object s, RoutedEventArgs e) => Process.Start(new ProcessStartInfo(service.ReceivedDirectory) { UseShellExecute = true });
 }

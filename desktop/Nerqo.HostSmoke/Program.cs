@@ -4,6 +4,10 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 
+if (!NativeUpdateService.IsNewerVersion("v0.6.0", new Version(0,5,0))) throw new Exception("Native update version detection failed");
+if (NativeUpdateService.IsNewerVersion("v0.5.0", new Version(0,5,0))) throw new Exception("Same version should not upgrade");
+if (NativeUpdateService.IsNewerVersion("v0.3.0", new Version(0,5,0))) throw new Exception("Legacy release should not downgrade");
+if (NativeUpdateService.IsNewerVersion("v0.7.0-preview", new Version(0,5,0))) throw new Exception("Pre-release tag should be rejected");
 await using var host = new LanHost();
 await host.StartAsync();
 await using (var secondInstance = new LanHost())
