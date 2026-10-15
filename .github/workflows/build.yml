@@ -1,0 +1,47 @@
+name: Build desktop and Android apps
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Run tests
+        run: python -m unittest discover -s tests -v
+      - name: Build Windows EXE
+        run: |
+          python -m pip install pyinstaller==6.16.0
+          pyinstaller --noconfirm --onefile --name Nerqo --add-data "web;web" app.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Nerqo-Windows
+          path: dist/Nerqo.exe
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - name: Install Android SDK platform
+        run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+      - name: Build APK
+        working-directory: android
+        run: gradle :app:assembleDebug --no-daemon
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Nerqo-Android
+          path: android/app/build/outputs/apk/debug/*.apk

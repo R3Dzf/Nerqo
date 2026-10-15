@@ -1,0 +1,25 @@
+Nerqo v0.1.0 — LOCAL OFFLINE TRANSFER RELEASE CANDIDATE
+Build date: 2026-10-15
+
+TESTED IN THIS ENVIRONMENT:
+- Python syntax compilation
+- JavaScript syntax using Node.js v22
+- Python unit/integration HTTP tests (9 tests passed)
+- Pair/revoke session flow, URL/text creation, chunked file transfer,
+  resume, cross-device simulated loopback access, Range downloads,
+  invalid path rejection and host-only delete.
+
+NOT TESTED / NOT PROVIDED AS BINARIES:
+- Android APK: Android SDK not available here; native source and build workflow included.
+- Windows EXE: no Windows build environment; launch directly via Start-Nerqo.bat
+  and build EXE using included GitHub Actions workflow.
+- Actual laptop/phone LAN or hotspot transfer: requires two physical devices.
+- Full browser UI regression: automated headless browser blocked by container policy.
+
+NOT YET IMPLEMENTED:
+- Wi-Fi Direct peer creation
+- Bluetooth transport
+- Automatic hotspot creation
+- Authenticated TLS / E2EE
+- Native background clipboard synchronization
+- Native Android-to-Android or independent Android host mode
