@@ -1,4 +1,4 @@
-Nerqo v0.2.0 — DELTA UPDATE INTEGRATION (source + CI)
+Nerqo v0.3.0 — DELTA UPDATE INTEGRATION (source + CI)
 
 IMPLEMENTED:
 - NRQDEL01 portable rsync-style binary delta codec (Windows Python + Android Java).
@@ -18,3 +18,7 @@ LIMITATIONS:
   v0.2.0 onward, future releases can use delta updates if old binaries match.
 - End-to-end upgrade smoke tests on real Android + Windows devices are still required.
 - Wi-Fi Direct, Bluetooth and encrypted LAN transport are separate roadmap items.
+
+0.3.0: redesigned cross-device UI, native Android pairing screen,
+permanent release signing certificate pinned (identity outside public repo).
+Release requires GitHub Actions secrets; debug builds are not release-signed.

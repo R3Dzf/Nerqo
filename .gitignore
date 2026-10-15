@@ -20,3 +20,9 @@ dist/
 .env
 .env.*
 !*.env.example
+
+# Signing identities and recovery data (never commit)
+*.p12
+*.pfx
+*signing-recovery*
+*credentials-private*

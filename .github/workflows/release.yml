@@ -42,9 +42,25 @@ jobs:
           echo "NERQO_STORE_PASSWORD=$STORE_PASSWORD" >> "$GITHUB_ENV"
           echo "NERQO_KEY_ALIAS=$KEY_ALIAS" >> "$GITHUB_ENV"
           echo "NERQO_KEY_PASSWORD=$KEY_PASSWORD" >> "$GITHUB_ENV"
+      - name: Confirm permanent Android signing identity
+        run: |
+          set -euo pipefail
+          ACTUAL=$(keytool -list -v -keystore "$NERQO_SIGNING_FILE" -storepass "$NERQO_STORE_PASSWORD" -alias "$NERQO_KEY_ALIAS" | sed -n 's/.*SHA256: //p' | head -1 | tr -d ':' | tr '[:upper:]' '[:lower:]')
+          EXPECTED=$(tr -d '\n\r ' < android/RELEASE_SIGNING_CERT.sha256)
+          if [ -z "$ACTUAL" ] || [ "$ACTUAL" != "$EXPECTED" ]; then
+            echo 'Signing identity does not match the pinned Nerqo Android certificate.'
+            exit 1
+          fi
       - name: Build signed APK
         working-directory: android
         run: gradle :app:assembleRelease --no-daemon
+      - name: Verify signed Android APK
+        run: |
+          set -euo pipefail
+          APK=android/app/build/outputs/apk/release/app-release.apk
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$APK"
+          ACTUAL=$("$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs "$APK" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | head -1 | tr '[:upper:]' '[:lower:]')
+          test "$ACTUAL" = "$(cat android/RELEASE_SIGNING_CERT.sha256)" || (echo 'Built APK certificate mismatch' && exit 1)
       - uses: actions/upload-artifact@v4
         with:
           name: release-android

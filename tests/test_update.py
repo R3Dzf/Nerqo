@@ -1,6 +1,7 @@
 import unittest
 from unittest.mock import patch
 from nerqo.update import choose_asset,newer, WindowsUpdater
+from nerqo.version import VERSION
 
 class UpdateLogicTests(unittest.TestCase):
     def test_version_order(self):
@@ -11,8 +12,8 @@ class UpdateLogicTests(unittest.TestCase):
 
     def test_choose_delta_exact_hash_and_savings(self):
         group={'full':{'size':1000,'name':'exe'},'deltas':[
-            {'from_version':'0.2.0','base_sha256':'correct','size':250,'name':'delta'},
-            {'from_version':'0.2.0','base_sha256':'wrong','size':25,'name':'bad'}]}
+            {'from_version':VERSION,'base_sha256':'correct','size':250,'name':'delta'},
+            {'from_version':VERSION,'base_sha256':'wrong','size':25,'name':'bad'}]}
         self.assertEqual(choose_asset(group,'correct')['name'],'delta')
         self.assertEqual(choose_asset(group,'unknown')['name'],'exe')
         group['deltas'][0]['size']=950

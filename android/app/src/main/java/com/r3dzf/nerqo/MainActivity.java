@@ -5,6 +5,9 @@ import android.app.DownloadManager;
 import android.content.Context;
 import android.content.Intent;
 import android.graphics.Color;
+import android.graphics.drawable.GradientDrawable;
+import android.widget.ScrollView;
+import android.widget.PopupMenu;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Environment;
@@ -47,14 +50,17 @@ public final class MainActivity extends Activity {
     private LinearLayout root;
     private EditText hostInput;
     private String hostUrl;
-    private int accent = Color.rgb(161,234,208);
+    private final int accent = Color.rgb(169,238,210);
+    private static final int BG = Color.rgb(20,32,46);
+    private static final int SURFACE = Color.rgb(27,43,59);
+    private static final int SOFT = Color.rgb(176,198,211);
     private final Handler main = new Handler(Looper.getMainLooper());
     private String incomingText;
 
     @Override public void onCreate(Bundle saved) {
         super.onCreate(saved);
-        getWindow().setStatusBarColor(Color.rgb(12,17,25));
-        getWindow().setNavigationBarColor(Color.rgb(12,17,25));
+        getWindow().setStatusBarColor(BG);
+        getWindow().setNavigationBarColor(BG);
         incomingText = readShare(getIntent());
         hostUrl = getPreferences(MODE_PRIVATE).getString("host", "");
         if(hostUrl.isEmpty()) showConnect(); else showBrowser();
@@ -71,26 +77,96 @@ public final class MainActivity extends Activity {
     }
     private int dp(float value) {return Math.round(value*getResources().getDisplayMetrics().density);}
     private TextView text(String value,int sp,boolean strong){
-        TextView t=new TextView(this);t.setText(value);t.setTextColor(Color.WHITE);t.setTextSize(sp);if(strong)t.setTypeface(null,Typeface.BOLD);return t;
+        TextView t=new TextView(this);
+        t.setText(value);t.setTextColor(Color.WHITE);t.setTextSize(sp);
+        if(strong)t.setTypeface(null,Typeface.BOLD);
+        return t;
+    }
+    private GradientDrawable shape(int fill,int radius,int border) {
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(fill);bg.setCornerRadius(dp(radius));
+        if(border!=0)bg.setStroke(dp(1),border);
+        return bg;
+    }
+    private LinearLayout.LayoutParams space(int height,int top) {
+        LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-1,height < 0? height:dp(height));
+        p.topMargin=dp(top);return p;
+    }
+    private TextView caption(String value) {
+        TextView t=text(value,12,true);t.setTextColor(SOFT);t.setLetterSpacing(.12f);return t;
+    }
+    private Button button(String label,boolean filled) {
+        Button b=new Button(this);
+        b.setText(label);b.setTextSize(14);b.setAllCaps(false);
+        b.setTypeface(null,Typeface.BOLD);
+        b.setTextColor(filled ? Color.rgb(24,66,57):Color.WHITE);
+        b.setBackground(shape(filled?accent:Color.rgb(43,64,82),14,filled?0:Color.rgb(73,99,116)));
+        b.setElevation(0);return b;
     }
     private void initRoot() {
-        root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);root.setBackgroundColor(Color.rgb(12,17,25));setContentView(root);
+        root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);
+        root.setBackgroundColor(BG);setContentView(root);
     }
     private void showConnect() {
         web=null;initRoot();
-        LinearLayout body=new LinearLayout(this);body.setOrientation(LinearLayout.VERTICAL);body.setPadding(dp(24),dp(70),dp(24),dp(20));root.addView(body,new LinearLayout.LayoutParams(-1,-1));
-        TextView logo=text("↔",52,true);logo.setTextColor(accent);body.addView(logo);
-        TextView title=text("Nerqo",32,true);body.addView(title);
-        TextView desc=text("Connect to your laptop over Wi-Fi or a hotspot. No internet required.",15,false);desc.setTextColor(Color.rgb(174,193,206));desc.setPadding(0,dp(12),0,dp(24));body.addView(desc);
-        hostInput=new EditText(this);hostInput.setSingleLine(true);hostInput.setTextColor(Color.WHITE);hostInput.setHintTextColor(Color.GRAY);
-        hostInput.setHint("Laptop IP e.g. 192.168.1.7");hostInput.setInputType(InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_VARIATION_URI);
+        ScrollView scroll=new ScrollView(this);scroll.setFillViewport(true);
+        scroll.setClipToPadding(false);root.addView(scroll,new LinearLayout.LayoutParams(-1,-1));
+        LinearLayout body=new LinearLayout(this);body.setOrientation(LinearLayout.VERTICAL);
+        body.setPadding(dp(24),dp(34),dp(24),dp(32));scroll.addView(body);
+
+        LinearLayout brand=new LinearLayout(this);brand.setGravity(Gravity.CENTER_VERTICAL);brand.setOrientation(LinearLayout.HORIZONTAL);
+        TextView mark=text("↔",27,true);mark.setTextColor(Color.rgb(29,74,63));mark.setGravity(Gravity.CENTER);
+        mark.setBackground(shape(accent,13,0));brand.addView(mark,new LinearLayout.LayoutParams(dp(46),dp(46)));
+        TextView wordmark=text("  Nerqo.",24,true);brand.addView(wordmark);
+        body.addView(brand);
+
+        TextView kicker=caption("LOCAL-FIRST SHARING");kicker.setTextColor(accent);
+        body.addView(kicker,space(-2,44));
+        TextView title=text("Send anything.\nStay connected.",36,true);
+        title.setLineSpacing(dp(3),1f);body.addView(title,space(-2,12));
+        TextView desc=text("Move files, links and notes between your Android and Windows devices. No cloud. No internet needed.",15,false);
+        desc.setTextColor(SOFT);desc.setLineSpacing(dp(5),1f);body.addView(desc,space(-2,14));
+
+        LinearLayout pairCard=new LinearLayout(this);pairCard.setOrientation(LinearLayout.VERTICAL);
+        pairCard.setPadding(dp(20),dp(22),dp(20),dp(22));
+        pairCard.setBackground(shape(SURFACE,20,Color.rgb(54,79,98)));
+        body.addView(pairCard,space(-2,34));
+        TextView cardTitle=text("Connect your laptop",20,true);pairCard.addView(cardTitle);
+        TextView sub=text("Both devices must be on the same Wi-Fi or hotspot.",13,false);
+        sub.setTextColor(SOFT);sub.setPadding(0,dp(6),0,dp(22));pairCard.addView(sub);
+        pairCard.addView(caption("LAPTOP ADDRESS"));
+        hostInput=new EditText(this);
+        hostInput.setSingleLine(true);hostInput.setTextSize(14);
+        hostInput.setPadding(dp(16),0,dp(16),0);
+        hostInput.setTextColor(Color.WHITE);hostInput.setHintTextColor(Color.rgb(137,160,176));
+        hostInput.setHint("192.168.1.7 or 192.168.1.7:44888");
+        hostInput.setInputType(InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_VARIATION_URI);
+        hostInput.setImeOptions(android.view.inputmethod.EditorInfo.IME_ACTION_GO);
+        hostInput.setBackground(shape(Color.rgb(35,53,70),12,Color.rgb(70,96,113)));
         hostInput.setText(getPreferences(MODE_PRIVATE).getString("lastip",""));
-        body.addView(hostInput,new LinearLayout.LayoutParams(-1,dp(60)));
-        Button button=new Button(this);button.setText("Connect to laptop");button.setAllCaps(false);body.addView(button);button.setOnClickListener(v->connect(hostInput.getText().toString()));
-        Button checkUpdates=new Button(this);checkUpdates.setText("Check for app updates");checkUpdates.setAllCaps(false);body.addView(checkUpdates);checkUpdates.setOnClickListener(v->AppUpdater.check(this));
-        Button scan=new Button(this);scan.setText("Find laptop on local Wi-Fi");scan.setAllCaps(false);body.addView(scan);scan.setOnClickListener(v->discover(scan));
-        TextView hint=text("The laptop must be running Nerqo. Enter the 6-digit PIN shown on the laptop after connecting.",13,false);
-        hint.setTextColor(Color.rgb(148,169,183));hint.setPadding(0,dp(20),0,0);body.addView(hint);
+        pairCard.addView(hostInput,space(55,10));
+        Button connectBtn=button("Connect to laptop   →",true);
+        pairCard.addView(connectBtn,space(54,16));
+        connectBtn.setOnClickListener(v->connect(hostInput.getText().toString()));
+        hostInput.setOnEditorActionListener((v,action,event)->{
+            if(action==android.view.inputmethod.EditorInfo.IME_ACTION_GO){connect(hostInput.getText().toString());return true;}return false;
+        });
+        Button discoverBtn=button("⌁   Find nearby laptop",false);
+        pairCard.addView(discoverBtn,space(51,10));
+        discoverBtn.setOnClickListener(v->discover(discoverBtn));
+
+        LinearLayout information=new LinearLayout(this);information.setGravity(Gravity.CENTER_VERTICAL);
+        TextView icon=text("◎",25,true);icon.setTextColor(accent);
+        information.addView(icon,new LinearLayout.LayoutParams(dp(42),dp(43)));
+        TextView info=text("Private local transfers\nPair using the 6-digit code shown on your laptop.",12,false);
+        info.setTextColor(SOFT);info.setLineSpacing(dp(3),1f);information.addView(info);
+        body.addView(information,space(-2,23));
+        Button checkUpdates=button("↻   Check for app updates",false);
+        body.addView(checkUpdates,space(50,30));
+        checkUpdates.setOnClickListener(v->AppUpdater.check(this));
+        TextView footer=text("Nerqo · Android  |  Works without mobile data",11,false);
+        footer.setTextColor(Color.rgb(145,171,185));footer.setGravity(Gravity.CENTER);
+        body.addView(footer,space(-2,21));
     }
     private void connect(String ip) {
         ip=ip.trim();String target=ip;
@@ -129,12 +205,12 @@ public final class MainActivity extends Activity {
     }
     private void showBrowser() {
         initRoot();
-        Toolbar bar=new Toolbar(this);bar.setTitle("Nerqo");bar.setTitleTextColor(Color.WHITE);bar.setBackgroundColor(Color.rgb(16,23,34));
-        root.addView(bar,new LinearLayout.LayoutParams(-1,dp(48)));
+        Toolbar bar=new Toolbar(this);bar.setTitle("Nerqo  ↗");bar.setTitleTextColor(Color.WHITE);bar.setSubtitle("LOCAL TRANSFERS");bar.setSubtitleTextColor(SOFT);bar.setBackgroundColor(SURFACE);
+        root.addView(bar,new LinearLayout.LayoutParams(-1,dp(64)));
         bar.getMenu().add(0,1,0,"Change laptop");bar.getMenu().add(0,2,1,"Refresh");bar.getMenu().add(0,3,2,"Check for updates");
         bar.setOnMenuItemClickListener(item->{if(item.getItemId()==1){hostUrl="";getPreferences(MODE_PRIVATE).edit().remove("host").apply();showConnect();return true;}if(item.getItemId()==2){web.reload();return true;}if(item.getItemId()==3){AppUpdater.check(this);return true;}return false;});
         web=new WebView(this);root.addView(web,new LinearLayout.LayoutParams(-1,0,1));
-        web.setBackgroundColor(Color.rgb(12,17,25));
+        web.setBackgroundColor(BG);
         web.getSettings().setJavaScriptEnabled(true);web.getSettings().setDomStorageEnabled(true);
         web.getSettings().setUserAgentString(web.getSettings().getUserAgentString()+" NerqoAndroid");
         web.getSettings().setAllowFileAccess(false);web.getSettings().setAllowContentAccess(true);

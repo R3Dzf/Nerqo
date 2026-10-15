@@ -1,51 +1,87 @@
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#10151f"><meta name="description" content="Offline device-to-device sharing over your local Wi-Fi.">
-<title>Nerqo · Share without internet</title>
-<link rel="icon" href="/favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="/style.css">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#172434">
+  <meta name="description" content="Nerqo moves files, links and text across your local network. No cloud required.">
+  <title>Nerqo — Move freely</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/style.css">
 </head>
 <body>
-<div id="toast" class="toast hidden" role="status"></div>
-<div class="app-shell">
-  <aside class="sidebar">
-    <div class="brand"><span class="brand-icon">↔</span><div><b>Nerqo</b><small>Local transfer</small></div></div>
-    <nav aria-label="Main navigation"><button class="nav-item selected" data-view="send"><span>↗</span> Send</button><button class="nav-item" data-view="inbox"><span>▤</span> Transfers <i id="count">0</i></button><button class="nav-item" data-view="connect"><span>◉</span> Connect</button></nav>
-    <div class="sidebar-bottom"><div class="privacy-note">◎ &nbsp;No cloud • No Internet required</div><span>Made for sharing, not uploading to strangers.</span></div>
-  </aside>
-  <div class="main-wrap">
-    <header class="topbar"><span class="mobile-logo">Nerqo <span>↗</span></span><span class="connection-pill"><span id="dot" class="dot"></span><span id="connectionText">Connecting…</span></span><span id="serverName" class="server-name"></span><button id="themeToggle" class="icon-button" aria-label="Toggle dark theme">◐</button></header>
-    <main>
-      <section id="pairView" class="pair-view hidden">
-        <div class="pair-art">⌁</div><div class="eyebrow">PRIVATE CONNECTION</div><h1>One quick connection.<br>Everything in sync.</h1><p>Connect to the same Wi-Fi or phone hotspot. Enter the pairing PIN shown on the laptop.</p>
-        <form id="pairForm" class="pair-form"><label for="phoneName">This device's name</label><input id="phoneName" placeholder="My Android" maxlength="80" autocomplete="off" required><label for="pinInput">6-digit pairing code</label><input id="pinInput" type="text" inputmode="numeric" maxlength="6" pattern="[0-9]{6}" placeholder="● ● ● ● ● ●" required autocomplete="one-time-code"><button type="submit" class="primary">Connect device <span>→</span></button><div class="muted" id="pairStatus"></div></form>
-      </section>
-      <div id="dashboard" class="hidden">
-        <div id="sendView" class="view"><div class="eyebrow">TRANSFER IN A MOMENT</div><h1>Send anything.<br><em>Stay offline.</em></h1><p class="intro">Files, folders, links and text. Your devices only need a local Wi-Fi connection.</p>
-          <div class="feature-grid">
-            <article class="feature-card file-card"><span class="card-icon file">↥</span><h2>Send files</h2><p>Any format, any size your device can store. Resume interrupted uploads.</p>
-              <div class="file-actions"><button class="primary" id="pickFiles">Select files ↗</button><button class="secondary" id="pickFolder">Folder</button></div>
-              <input type="file" id="filesInput" multiple hidden><input type="file" id="folderInput" webkitdirectory multiple hidden>
-              <div id="dropZone" class="drop-zone" tabindex="0">Or drag and drop here</div>
-            </article>
-            <article class="feature-card note-card"><span class="card-icon link">↗</span><h2>Send a link or text</h2><p>The other device sees it here immediately. Opening external websites may require internet.</p>
-              <div class="type-tabs" role="tablist"><button data-kind="link" class="type-tab active" role="tab">Link</button><button data-kind="text" class="type-tab" role="tab">Text</button></div>
-              <textarea id="noteContent" spellcheck="false" placeholder="https://example.com" rows="3" maxlength="32768"></textarea><button id="sendNote" class="primary full">Send link <span>→</span></button>
-            </article>
-          </div>
-          <div class="queue-panel hidden" id="queuePanel"><div class="section-head"><h2>Sending files</h2><span id="uploadCounter" class="muted"></span></div><div id="uploadQueue"></div><div class="queue-buttons"><button id="stopQueue" class="secondary small">Pause after current chunk</button><button id="resumeQueue" class="secondary small hidden">Resume</button></div></div>
-          <div class="hint-panel"><span>⌁</span><div><b>How offline transfer works</b><p>Wi-Fi with no internet is enough. You can use your phone hotspot, even with mobile data switched off. Both devices must be on the same local network.</p></div></div>
-        </div>
-        <div id="inboxView" class="view hidden"><div class="eyebrow">YOUR LOCAL SHARES</div><h1>Shared items.<br><em>All in one place.</em></h1><p class="intro">Everything sent stays on the host computer until you delete it. Download items on either device.</p><div class="section-head"><h2>Recent activity</h2><button id="refresh" class="secondary small">↻ Refresh</button></div><div class="item-list" id="items"></div></div>
-        <div id="connectView" class="view hidden"><div class="eyebrow">ONE LOCAL NETWORK</div><h1>Connect your<br><em>devices.</em></h1><p class="intro">This computer is the host. Open the address below on your mobile device.</p><div class="connect-panel">
-          <div id="hostInstructions"><div class="connect-step"><b>01</b><div><strong>Connect both devices to the same Wi-Fi</strong><p>No internet needed. A phone hotspot also works.</p></div></div><div class="connect-step"><b>02</b><div><strong>Open the local address on Android</strong><p id="addressList">See the address printed in the terminal.</p></div></div><div class="connect-step"><b>03</b><div><strong>Enter this pairing PIN</strong><div id="visiblePin" class="pin-box">••••••</div><p>Never share it with devices you don't recognize.</p></div></div><button id="revoke" class="danger-button">Disconnect all paired devices and change PIN</button></div>
-          <div id="updatePanel" class="update-panel hidden"><h3>Application updates</h3><p id="updateMessage">Nerqo updates are downloaded only when you request them. Transfers still work offline.</p><div class="queue-buttons"><button id="checkUpdates" class="secondary small">Check for updates</button><button id="prepareUpdate" class="primary small hidden">Download update</button><button id="installUpdate" class="primary small hidden">Install &amp; restart</button></div><div class="progress-track hidden" id="updateProgress"><span id="updateProgressFill"></span></div></div><div id="mobileInstructions" class="hidden"><div class="connect-step"><b>✓</b><div><strong>This device is paired</strong><p>Keep the Windows app running. Files arrive in the Transfers tab and stay local.</p></div></div></div>
-        </div><div class="warning">On this version, transfers use HTTP over your local network, not end-to-end encryption. Use a private, trusted Wi-Fi network; avoid shared public hotspots.</div></div>
+  <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
+  <div class="app-shell">
+    <aside class="sidebar" aria-label="App sidebar">
+      <div class="brand">
+        <span class="brand-icon" aria-hidden="true"><svg viewBox="0 0 32 32" fill="none"><path d="M5 11h21m-6-6 6 6-6 6M27 21H6m6-6-6 6 6 6" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+        <div class="brand-copy"><b>Nerqo<span class="brand-dot">.</span></b><small>DEVICE-TO-DEVICE</small></div>
       </div>
-    </main>
-    <footer><span>Offline by design</span><span id="footerText">Nerqo 0.2.0</span></footer>
+      <div class="sidebar-label">WORKSPACE</div>
+      <nav aria-label="Main navigation">
+        <button class="nav-item selected" data-view="send"><span class="nav-symbol" aria-hidden="true">↗</span><span>Send something</span></button>
+        <button class="nav-item" data-view="inbox"><span class="nav-symbol" aria-hidden="true">▤</span><span>Transfers</span><i id="count">0</i></button>
+        <button class="nav-item" data-view="connect"><span class="nav-symbol" aria-hidden="true">◉</span><span>Devices &amp; settings</span></button>
+      </nav>
+      <div class="sidebar-bottom">
+        <div class="local-card"><span class="local-orbit" aria-hidden="true">⌁</span><strong>Made for your devices</strong><p>No account. No cloud. Just a direct connection over your local network.</p></div>
+        <div class="sidebar-foot"><span class="privacy-dot"></span> PRIVATE BY DESIGN <span class="version-small">v0.3.0</span></div>
+      </div>
+    </aside>
+    <div class="main-wrap">
+      <header class="topbar">
+        <div class="topbar-heading"><span class="mobile-logo">Nerqo<span>.</span></span><span class="desktop-label">Your personal transfer space</span></div>
+        <div class="topbar-actions"><span class="connection-pill"><span id="dot" class="dot"></span><span id="connectionText">Connecting…</span></span><span id="serverName" class="server-name"></span><button id="themeToggle" class="icon-button" aria-label="Toggle light or dark theme" title="Switch theme">◐</button></div>
+      </header>
+      <main>
+        <section id="pairView" class="pair-view hidden">
+          <div class="pair-illustration" aria-hidden="true"><div class="pair-device pc">▣</div><span class="pair-path">····↔····</span><div class="pair-device phone">▯</div></div>
+          <span class="eyebrow"><span class="eyebrow-dot"></span> QUICK PAIRING</span>
+          <h1>Two devices.<br><em>One smooth flow.</em></h1>
+          <p class="intro">Connect through your local Wi-Fi or mobile hotspot. Enter the pairing code shown on the laptop to get started.</p>
+          <form id="pairForm" class="pair-form">
+            <label for="phoneName">Name this device</label><input id="phoneName" placeholder="e.g. My Android" maxlength="80" autocomplete="off" required>
+            <label for="pinInput">Six-digit pairing code</label><input id="pinInput" type="text" inputmode="numeric" maxlength="6" pattern="[0-9]{6}" placeholder="0 0 0 0 0 0" required autocomplete="one-time-code">
+            <button type="submit" class="primary">Connect device <span>→</span></button>
+            <div class="muted" id="pairStatus" role="status"></div>
+          </form>
+        </section>
+        <div id="dashboard" class="hidden">
+          <div id="sendView" class="view">
+            <section class="hero">
+              <div class="hero-copy"><span class="eyebrow"><span class="eyebrow-dot"></span> YOUR SPACE, YOUR DEVICES</span><h1>Whatever it is.<br><em>Send it over.</em></h1><p class="intro">Move files, links and notes between your devices in seconds. No account, no uploads, no internet connection.</p>
+                <div class="hero-benefits"><span>◎ Local Wi-Fi</span><span>↗ Two-way sharing</span><span>◷ Resume transfers</span></div>
+              </div>
+              <div class="hero-visual" aria-hidden="true"><div class="hero-glow"></div><div class="visual-laptop"><div class="visual-screen"><span class="visual-dot"></span><span class="visual-bar"></span><span class="visual-bar short"></span><div class="visual-progress"><i></i></div></div><div class="visual-stand"></div></div><div class="visual-stream">↗ · · ·</div><div class="visual-phone"><span class="visual-notch"></span><span class="visual-file">↥</span><span class="visual-mini"></span><span class="visual-mini small"></span></div><span class="visual-check">✓</span></div>
+            </section>
+            <div class="section-heading"><div><span class="eyebrow">QUICK ACTIONS</span><h2>What would you like to share?</h2></div><span class="section-caption">Choose a transfer type to begin</span></div>
+            <div class="feature-grid">
+              <article class="feature-card file-card"><div class="card-top"><span class="card-icon file" aria-hidden="true">↥</span><span class="card-tag">ANY FILE TYPE</span></div><h2>Files &amp; folders</h2><p>Share a document, a hundred photos, or an entire folder. Pick up where you left off if the connection drops.</p>
+                <div class="file-actions"><button class="primary" id="pickFiles">Choose files <span>↗</span></button><button class="secondary" id="pickFolder">Folder</button></div>
+                <input type="file" id="filesInput" multiple hidden><input type="file" id="folderInput" webkitdirectory multiple hidden>
+                <div id="dropZone" class="drop-zone" tabindex="0" role="button" aria-label="Drop files here or press Enter to select"><span class="drop-icon">＋</span> Drop files here, or click to browse</div>
+              </article>
+              <article class="feature-card note-card"><div class="card-top"><span class="card-icon link" aria-hidden="true">↗</span><span class="card-tag">INSTANT SHARE</span></div><h2>Links &amp; text</h2><p>Send a URL or a quick thought without losing your flow. Access it instantly on the receiving device.</p>
+                <div class="type-tabs" role="tablist" aria-label="Message type"><button data-kind="link" class="type-tab active" role="tab" aria-selected="true">Link</button><button data-kind="text" class="type-tab" role="tab" aria-selected="false">Text</button></div>
+                <textarea id="noteContent" spellcheck="false" placeholder="https://example.com" rows="3" maxlength="32768" aria-label="Link or text to share"></textarea><button id="sendNote" class="primary full">Send link <span>→</span></button>
+              </article>
+            </div>
+            <div class="queue-panel hidden" id="queuePanel"><div class="section-head"><h2>Transfer queue</h2><span id="uploadCounter" class="muted"></span></div><div id="uploadQueue"></div><div class="queue-buttons"><button id="stopQueue" class="secondary small">Pause after current chunk</button><button id="resumeQueue" class="secondary small hidden">Resume</button></div></div>
+            <div class="hint-panel"><span class="hint-icon" aria-hidden="true">⌁</span><div><b>Works without internet</b><p>Both devices just need the same local Wi-Fi, or a hotspot from your phone. Mobile data can stay switched off.</p></div><button class="hint-arrow" type="button" id="seeConnect" aria-label="Show connection setup">→</button></div>
+          </div>
+          <div id="inboxView" class="view hidden"><span class="eyebrow"><span class="eyebrow-dot"></span> YOUR SHARED SPACE</span><h1>Everything in<br><em>one place.</em></h1><p class="intro">Files, links, and notes live on your host computer until you remove them.</p><div class="section-head"><h2>Recent transfers</h2><button id="refresh" class="secondary small">↻ Refresh</button></div><div class="item-list" id="items"></div></div>
+          <div id="connectView" class="view hidden"><span class="eyebrow"><span class="eyebrow-dot"></span> DEVICES &amp; CONNECTIONS</span><h1>Made to<br><em>connect.</em></h1><p class="intro">Connect nearby devices over the same local Wi-Fi. You don't need an active internet plan.</p>
+            <div class="connect-panel"><div id="hostInstructions"><div class="connect-step"><b>01</b><div><strong>Join the same Wi-Fi network</strong><p>Your phone can also host a hotspot with mobile data off.</p></div></div><div class="connect-step"><b>02</b><div><strong>Open this address on the other device</strong><p id="addressList">The local IP will appear here.</p></div></div><div class="connect-step"><b>03</b><div><strong>Enter your one-time pairing code</strong><div id="visiblePin" class="pin-box">••••••</div><p>Only share this with devices you recognize.</p></div></div><button id="revoke" class="danger-button">Disconnect all devices &amp; reset code</button></div>
+              <div id="updatePanel" class="update-panel hidden"><div class="section-head"><h3>App updates</h3><span class="update-icon" aria-hidden="true">↻</span></div><p id="updateMessage">Updates are optional and require internet only when downloading. Local transfers still work offline.</p><div class="queue-buttons"><button id="checkUpdates" class="secondary small">Check for updates</button><button id="prepareUpdate" class="primary small hidden">Download update</button><button id="installUpdate" class="primary small hidden">Install &amp; restart</button></div><div class="progress-track hidden" id="updateProgress"><span id="updateProgressFill"></span></div></div>
+              <div id="mobileInstructions" class="hidden"><div class="connect-step"><b>✓</b><div><strong>Your device is paired</strong><p>Keep the Windows host running. Files will appear under Transfers.</p></div></div></div>
+            </div>
+            <p class="warning"><span>ⓘ</span> Transfers currently use HTTP on your local network, not end-to-end encryption. Only use trusted private networks.</p>
+          </div>
+        </div>
+      </main>
+      <footer><span>© Nerqo · Stay local, move freely.</span><span id="footerText">Nerqo 0.3.0</span></footer>
+    </div>
   </div>
-</div>
-</body><script src="/app.js" defer></script>
+  <script src="/app.js" defer></script>
+</body>
 </html>
