@@ -28,8 +28,8 @@ class UISigningTests(unittest.TestCase):
         from nerqo.version import VERSION
         self.assertEqual(VERSION,'0.3.0')
         gradle=(ROOT/'android/app/build.gradle.kts').read_text()
-        self.assertIn('versionName = "0.4.0"',gradle)
-        self.assertIn('versionCode = 4',gradle)
+        self.assertIn('versionName = "0.5.0"',gradle)
+        self.assertIn('versionCode = 5',gradle)
     def test_signed_release_verifies_identity(self):
         wf=(ROOT/'.github/workflows/release.yml').read_text()
         self.assertIn('Confirm permanent Android signing identity',wf)
