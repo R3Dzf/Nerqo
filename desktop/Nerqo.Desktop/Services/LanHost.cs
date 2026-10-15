@@ -127,8 +127,20 @@ public sealed class LanHost : IAsyncDisposable
     }
     private static async Task<JsonDocument> ReadJson(HttpRequest request, CancellationToken ct)
     {
-        if (request.ContentLength is null or > 65536 or < 1) throw new BadHttpRequestException("Invalid JSON body length", 413);
-        return await JsonDocument.ParseAsync(request.Body, new JsonDocumentOptions { MaxDepth = 12 }, ct);
+        if (request.ContentLength is > 65536 or 0) throw new BadHttpRequestException("JSON request too large or empty", 413);
+        // HttpClient can send Transfer-Encoding: chunked (no Content-Length).
+        // Stream to a fixed cap instead of trusting the declared body size.
+        using var memory = new MemoryStream();
+        byte[] block = new byte[8192];
+        while (true)
+        {
+            int n = await request.Body.ReadAsync(block, ct);
+            if (n == 0) break;
+            if (memory.Length + n > 65536) throw new BadHttpRequestException("JSON request too large", 413);
+            memory.Write(block, 0, n);
+        }
+        if (memory.Length == 0) throw new BadHttpRequestException("Empty JSON request", 400);
+        return JsonDocument.Parse(memory.ToArray(), new JsonDocumentOptions { MaxDepth = 12 });
     }
     private static string? Str(JsonElement json, string field) => json.TryGetProperty(field, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
     private static long Number(JsonElement json, string field) => json.TryGetProperty(field, out var v) && v.TryGetInt64(out long n) ? n : -1;

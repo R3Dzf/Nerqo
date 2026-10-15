@@ -8,7 +8,6 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
-import android.net.wifi.SoftApConfiguration
 import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.Bundle
@@ -226,13 +225,8 @@ class MainActivity : ComponentActivity() {
                 override fun onStopped() { hotspotText = ""; message = "Hotspot stopped" }
                 override fun onFailed(reason: Int) { hotspotText = ""; message = "Hotspot unavailable ($reason). Use system hotspot settings." }
             }
-            if (Build.VERSION.SDK_INT >= 36) {
-                try {
-                    val config = SoftApConfiguration.Builder().setBand(SoftApConfiguration.BAND_5GHZ).build()
-                    wifi.startLocalOnlyHotspotWithConfiguration(config, mainExecutor, callback)
-                    return
-                } catch (_: Exception) { /* Fallback to OS-selected band. */ }
-            }
+            // Use Android's generated WPA2/WPA3 credentials. Never create an open AP
+            // just to request a frequency band unsupported by the public API.
             wifi.startLocalOnlyHotspot(callback, null)
         } catch (e: Exception) {
             message = "Hotspot requires device support: ${e.message}"

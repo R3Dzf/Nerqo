@@ -1,0 +1,43 @@
+"""Native preview acceptance checks independent of Windows/Android SDK availability."""
+from pathlib import Path
+from xml.etree import ElementTree as ET
+import unittest
+ROOT = Path(__file__).resolve().parents[1]
+class NativeSources(unittest.TestCase):
+    def test_wpf_is_windows_gui_not_pyinstaller_or_browser(self):
+        project=(ROOT/'desktop/Nerqo.Desktop/Nerqo.Desktop.csproj').read_text()
+        self.assertIn('<OutputType>WinExe</OutputType>',project)
+        self.assertIn('<UseWPF>true</UseWPF>',project)
+        code=(ROOT/'desktop/Nerqo.Desktop/MainWindow.xaml.cs').read_text()
+        self.assertNotIn('WebView',code)
+        self.assertNotIn('webbrowser.open',code)
+        ET.parse(ROOT/'desktop/Nerqo.Desktop/MainWindow.xaml')
+    def test_android_is_compose_not_webview(self):
+        src=(ROOT/'android/app/src/main/java/com/r3dzf/nerqo/MainActivity.kt').read_text()
+        self.assertIn('setContent',src)
+        self.assertIn('startLocalOnlyHotspot',src)
+        self.assertIn('wifiText()',src)
+        self.assertNotIn('android.webkit.WebView',src)
+        self.assertFalse((ROOT/'android/app/src/main/java/com/r3dzf/nerqo/MainActivity.java').exists())
+        gradle=(ROOT/'android/app/build.gradle.kts').read_text()
+        self.assertIn('org.jetbrains.kotlin.plugin.compose',gradle)
+        self.assertIn('versionCode = 4',gradle)
+        self.assertIn('versionName = "0.4.0"',gradle)
+    def test_offline_protocol_and_radio_data(self):
+        host=(ROOT/'desktop/Nerqo.Desktop/Services/LanHost.cs').read_text()
+        client=(ROOT/'android/app/src/main/java/com/r3dzf/nerqo/NativeClient.kt').read_text()
+        self.assertIn('NERQO_DISCOVER_V1',host)
+        self.assertIn('NERQO_DISCOVER_V1',client)
+        for resource in ['/api/status','/api/pair','/api/items','/api/transfers/begin','/api/files/']:
+            with self.subTest(resource=resource):
+                self.assertIn(resource,host)
+                self.assertIn(resource,client)
+        self.assertIn('SHA256.HashData',host)
+        self.assertIn('SHA-256',client)
+        self.assertIn('44888',host)
+        self.assertIn('44888',client)
+    def test_permissions_and_no_private_key(self):
+        ET.parse(ROOT/'android/app/src/main/AndroidManifest.xml')
+        self.assertFalse(list(ROOT.rglob('*.p12')))
+        self.assertFalse(list(ROOT.rglob('*.jks')))
+if __name__=='__main__':unittest.main()

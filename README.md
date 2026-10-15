@@ -1,32 +1,37 @@
-# Nerqo
+# Nerqo — Native Windows + Android (Development Preview)
 
-**Move freely. Stay local.**
+**Move freely. Stay local.** Transfer files, links, and text between a Windows laptop and Android without an internet connection. Connect both devices to the same Wi-Fi network, or use a mobile hotspot.
 
-Nerqo is a local-first file, folder, link and text transfer companion for Windows and Android. Share over the same Wi-Fi network or phone hotspot without consuming your internet plan.
+> **Branch `dev/native-5ghz-20261016`: active native rebuild, not a stable release.** The existing `main` branch and published `v0.3.0` remain unchanged. Do not replace your installed signed Android app with this ephemeral CI debug build.
 
-## Experience
+## Native apps, not browser wrappers
 
-- Redesigned desktop and mobile-responsive interface with a balanced dark palette, light mode, accessible controls and transfer progress
-- Native Android pairing screen, automatic LAN discovery and "Share" support for links and text
-- Resume large transfers, pair devices with a six-digit code, and access shared items on either device
-- Delta updates with SHA-256 checks and full-package fallback
+| Platform | Implementation | Build |
+|---|---|---|
+| Windows | C# .NET 9, WPF window, embedded ASP.NET Core transfer host, tray integration; no console or browser | `dotnet publish desktop/Nerqo.Desktop/Nerqo.Desktop.csproj -c Release -r win-x64 --self-contained true` |
+| Android | Kotlin, Jetpack Compose, native document pickers and share intents; no `WebView` | `cd android && gradle :app:assembleDebug` |
 
-## Run on Windows
+Preview builds: [Nerqo native CI](https://github.com/R3Dzf/Nerqo/actions/workflows/native-preview.yml). Windows host smoke tests verify pairing/authentication, notes, chunk upload and file round-trip when CI is green.
 
-Run `Start-Nerqo.bat` or `python app.py` with Python 3.11+; the locally hosted UI opens in your browser. Connect your Android device through the same trusted local network. Android can use the app or a web browser.
+## Transfer and pairing
 
-## Prebuilt stable Android APK
+1. Run **Nerqo.exe** on Windows. No terminal or browser should open.
+2. Start Nerqo on your Android phone while both devices are connected to the same Wi-Fi or Android hotspot; disable mobile data to confirm offline operation.
+3. Tap **Find nearby Windows device**, select your PC, then enter its six-digit pairing code.
+4. Send text/links/files from either device. On Android, choose **Save** to download Windows-origin files. Android-origin files arrive in `%LOCALAPPDATA%/Nerqo/Received`.
 
-[Download Android v0.3.0, permanently release-signed](downloads/Nerqo-Android-v0.3.0.apk). The signing certificate is pinned under `android/RELEASE_SIGNING_CERT.sha256` and the APK SHA-256 is published alongside the binary. See [private offline release signing](docs/OFFLINE_RELEASE_SIGNING.md) for the independent rebuild + signature verification workflow.
+If discovery fails, check Windows Firewall allows the app on your **private** network and that your Wi-Fi AP doesn't isolate wireless clients. Enter the private Windows IP in Android as a fallback. UDP 44889 handles discovery; TCP 44888 handles transfers. **No links or IP addresses need to be opened in a browser.**
 
-## Build and releases
+## 5 GHz performance
 
-GitHub Actions automatically tests and builds Windows EXE, **debug Android APK**, and smoke-compiles an unsigned Android Release APK on ordinary pushes. The **manual-or-tagged release** pipeline requires the permanent Android release signing key held outside the public repository in GitHub Actions secrets; it verifies the certificate against `android/RELEASE_SIGNING_CERT.sha256`. The private keystore and recovery credentials must never be committed.
+Nerqo detects Wi-Fi frequency where Android/Windows permissions allow. Prefer **5 GHz**, or **6 GHz** if supported by both devices and hotspot/router; the local TCP transport automatically uses the established Wi-Fi radio. Android uses a secure system-selected local-only hotspot; select 5 GHz in system hotspot settings where available, rather than opening an unsecured custom AP. On other Android versions, select 5 GHz in the system hotspot settings if available.
 
-See [docs/SIGNING.md](docs/SIGNING.md) for steps and the important Android update-signature compatibility rule; see [docs/UPDATES.md](docs/UPDATES.md) for the delta protocol.
+**No Wi-Fi frequency is guaranteed by software.** 2.4 GHz still works as a fallback. Actual speed depends on your hotspot/router, Wi-Fi chipset, distance, channel width, signal and storage. 4 MiB file chunks, streamed reads/writes and resumable uploads avoid buffering whole files in memory.
 
-## Security and maturity
+## Security and roadmap
 
-Nerqo is still an early prototype. Transfers currently use HTTP over a **trusted private local network**, not end-to-end encryption. There is no Bluetooth or Wi-Fi Direct implementation yet, and Android/Windows installers have not been end-to-end tested on real devices. **A Windows EXE is not Authenticode-signed**; Android release signature and Windows publisher signing are different mechanisms.
+This is an **early preview for trusted private networks only**. PIN pairing and authenticated bearer tokens work, but LAN transport is currently **HTTP without end-to-end TLS encryption**. Don't use an untrusted public Wi-Fi hotspot. The nine-phase tracker and real-device acceptance tests are in [docs/NATIVE_ROADMAP.md](docs/NATIVE_ROADMAP.md).
 
-MIT license not yet selected; all rights reserved unless a license file is added.
+Pending before stable release: QR pairing and advanced diagnostics, pause/folder UI, encrypted mutual authentication, Wi-Fi Direct and Bluetooth transports, native Windows delta updater and installer, and stable signed release/regression testing. The permanent Android signing certificate from `v0.3.0` must remain unchanged; private keys are never checked into Git.
+
+Legacy `app.py` and `web/` are retained temporarily for migration and historical tests; neither is part of the native Windows executable.

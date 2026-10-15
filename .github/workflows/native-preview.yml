@@ -41,6 +41,11 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.13'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Run legacy regression + native source tests
+        run: python -m unittest discover -s tests -q
       - name: Compile Compose debug APK
         working-directory: android
         run: gradle :app:assembleDebug --stacktrace --no-daemon
