@@ -39,3 +39,7 @@ Legacy `app.py` and `web/` are retained temporarily for migration and historical
 ### Encrypted native pairing preview
 
 Windows displays a 12-character secure identity beside its pairing PIN. Verify that the identical code appears in Android before entering the PIN. Android pins the entire SHA-256 certificate fingerprint; file and note requests use HTTPS. Windows stores its identity private key encrypted with current-user Windows DPAPI. This is a development preview, not a completed security audit.
+
+### 0.5.0 native development preview
+
+Adds local-only QR pairing with certificate verification, per-device revocation, HTTPS transfers, 5 GHz / 6 GHz band awareness, and signed-Android update continuity. This development branch is not a security-audited or real-device-validated production release.

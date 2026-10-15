@@ -436,7 +436,7 @@ class MainActivity : ComponentActivity() {
                         (getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager).bindProcessToNetwork(null)
                         AppUpdater.check(this@MainActivity)
                     }) { Text("Check Android updates ↗") }
-                    Text("v0.4 native preview  ·  Trusted private LAN only", color = muted, fontSize = 11.sp)
+                    Text("v0.5 native preview  ·  Trusted private LAN only", color = muted, fontSize = 11.sp)
                     Spacer(Modifier.height(20.dp))
                 }
             }
