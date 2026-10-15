@@ -155,6 +155,31 @@ string emptyId = (await emptyResponse.Content.ReadFromJsonAsync<JsonElement>()).
 if ((await client.GetByteArrayAsync($"/api/files/{emptyId}")).Length != 0)
     throw new Exception("Empty file transfer corrupted");
 
+// Local Windows -> Android folder archive preserves nested directories and contents.
+string sampleFolder = Path.Combine(Path.GetTempPath(), "NerqoFolder-" + Guid.NewGuid().ToString("N"));
+try
+{
+    Directory.CreateDirectory(Path.Combine(sampleFolder, "nested", "empty"));
+    byte[] folderContents = Encoding.UTF8.GetBytes("folder transfer keeps the nested layout");
+    await File.WriteAllBytesAsync(Path.Combine(sampleFolder, "nested", "sample.txt"), folderContents);
+    await host.ShareFolderAsync(sampleFolder);
+    var archived = host.Items.FirstOrDefault(i => i.Content == Path.GetFileName(sampleFolder) + ".zip");
+    if (archived == null || archived.Kind != "file") throw new Exception("Folder archive absent from shared items");
+    string archiveFile = Path.Combine(host.StorageDirectory, archived.Id + ".bin");
+    using var zip = new System.IO.Compression.ZipArchive(File.OpenRead(archiveFile), System.IO.Compression.ZipArchiveMode.Read);
+    if (zip.GetEntry(Path.GetFileName(sampleFolder) + "/nested/empty/") == null)
+        throw new Exception("Empty folder was lost during archiving");
+    var fileInZip = zip.GetEntry(Path.GetFileName(sampleFolder) + "/nested/sample.txt")
+        ?? throw new Exception("Nested file lost during archiving");
+    using var read = fileInZip.Open();
+    using var buffer = new MemoryStream();
+    await read.CopyToAsync(buffer);
+    if (!folderContents.SequenceEqual(buffer.ToArray())) throw new Exception("Folder member bytes changed");
+    if (archived.Sha256 != Convert.ToHexString(SHA256.HashData(await File.ReadAllBytesAsync(archiveFile))).ToLowerInvariant())
+        throw new Exception("Folder archive checksum incorrect");
+}
+finally { if (Directory.Exists(sampleFolder)) Directory.Delete(sampleFolder, true); }
+
 var devices = host.PairedDevices;
 if (devices.Count == 0 || !host.RevokePeer(devices[0].TokenHash)) throw new Exception("Cannot revoke paired device");
 if ((await client.GetAsync("/api/items")).StatusCode != System.Net.HttpStatusCode.Unauthorized) throw new Exception("Revoked token still works");

@@ -126,6 +126,27 @@ public partial class MainWindow : Window
         }
         catch (Exception ex) { MessageBox.Show(ex.Message, "Transfer failed", MessageBoxButton.OK, MessageBoxImage.Warning); }
     }
+    private async void ShareFolder(object s, RoutedEventArgs e)
+    {
+        using var dialog = new System.Windows.Forms.FolderBrowserDialog
+        {
+            Description = "Choose a folder to send as a ZIP (including subfolders and empty folders)",
+            UseDescriptionForTitle = true,
+            ShowNewFolderButton = false
+        };
+        if (dialog.ShowDialog() != System.Windows.Forms.DialogResult.OK) return;
+        try
+        {
+            FooterLabel.Text = "Preparing folder archive…";
+            await service.ShareFolderAsync(dialog.SelectedPath);
+            FooterLabel.Text = "Folder ready on Android as a ZIP archive";
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(ex.Message, "Could not share folder", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
+
     private void ShareNote(object s, RoutedEventArgs e)
     {
         try { service.ShareNote(NoteInput.Text); NoteInput.Clear(); FooterLabel.Text = "Sent to paired devices"; }

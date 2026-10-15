@@ -9,6 +9,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Runtime.InteropServices;
+using System.IO.Compression;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
@@ -342,6 +343,83 @@ public sealed class LanHost : IAsyncDisposable
         string hash; using (var data = File.OpenRead(dest)) hash = Hex(SHA256.HashData(data));
         lock (gate) { state.Items.Add(new TransferItem { Id = id, Kind = "file", Sender = "Windows", Content = name, Size = original.Length, Sha256 = hash }); Save(); }
     }
+    /// <summary>
+    /// Share a complete folder as a stream-created ZIP archive, preserving nested
+    /// paths and empty directories. Reparse points are skipped to prevent the
+    /// selected folder from escaping into unrelated filesystem locations.
+    /// </summary>
+    public async Task ShareFolderAsync(string path, CancellationToken ct = default)
+    {
+        var directory = new DirectoryInfo(path);
+        if (!directory.Exists || directory.Attributes.HasFlag(FileAttributes.ReparsePoint))
+            throw new IOException("Select a real, accessible folder.");
+        string folder = ValidName(directory.Name);
+        string display = ValidName(folder[..Math.Min(folder.Length, 190)] + ".zip");
+        string id = Id();
+        string archivePath = Path.Combine(StorageDirectory, id + ".bin");
+        int entries = 0;
+        long totalBytes = 0;
+
+        async Task AddDirectoryAsync(ZipArchive zip, DirectoryInfo dir, string prefix, int depth)
+        {
+            ct.ThrowIfCancellationRequested();
+            if (depth > 64) throw new IOException("Folder nesting exceeds the safe limit of 64 levels.");
+            if (++entries > 100000) throw new IOException("Folder contains too many items (limit: 100000).");
+            zip.CreateEntry(prefix + "/", CompressionLevel.NoCompression);
+            foreach (var child in dir.EnumerateFileSystemInfos())
+            {
+                ct.ThrowIfCancellationRequested();
+                // Skip symlinks, junctions and other reparse points.
+                if (child.Attributes.HasFlag(FileAttributes.ReparsePoint)) continue;
+                string name = ValidName(child.Name);
+                string relative = prefix + "/" + name;
+                if (child is DirectoryInfo subdir)
+                {
+                    await AddDirectoryAsync(zip, subdir, relative, depth + 1);
+                }
+                else if (child is FileInfo file)
+                {
+                    if (++entries > 100000) throw new IOException("Folder has too many items.");
+                    if (file.Length > MaxFile - totalBytes) throw new IOException("Folder is larger than the 2 TB transfer policy.");
+                    totalBytes += file.Length;
+                    var entry = zip.CreateEntry(relative, CompressionLevel.Fastest);
+                    await using var source = new FileStream(file.FullName, FileMode.Open, FileAccess.Read,
+                        FileShare.Read, 1024 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan);
+                    await using var target = entry.Open();
+                    await source.CopyToAsync(target, 1024 * 1024, ct);
+                }
+            }
+        }
+
+        try
+        {
+            await using (var output = new FileStream(archivePath, FileMode.CreateNew, FileAccess.Write,
+                FileShare.None, 1024 * 1024, FileOptions.Asynchronous))
+            {
+                using var zip = new ZipArchive(output, ZipArchiveMode.Create, leaveOpen: true);
+                await AddDirectoryAsync(zip, directory, folder, 0);
+            }
+            long size = new FileInfo(archivePath).Length;
+            if (size > MaxFile) throw new IOException("Compressed folder exceeds the transfer size limit.");
+            string digest;
+            using (var input = File.OpenRead(archivePath)) digest = Hex(SHA256.HashData(input));
+            lock (gate)
+            {
+                state.Items.Add(new TransferItem
+                {
+                    Id = id, Kind = "file", Sender = "Windows", Content = display,
+                    Size = size, Sha256 = digest
+                });
+                Save();
+            }
+        }
+        catch
+        {
+            if (File.Exists(archivePath)) File.Delete(archivePath);
+            throw;
+        }
+    }
+
     public void ShareNote(string content)
     {
         if (string.IsNullOrWhiteSpace(content) || Encoding.UTF8.GetByteCount(content) > 32768) throw new ArgumentException("Text must be 1–32768 bytes.");
