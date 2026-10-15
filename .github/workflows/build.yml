@@ -47,7 +47,17 @@ jobs:
       - name: Confirm smoke-test APK is not published as a signed release
         run: |
           test -f android/app/build/outputs/apk/release/app-release-unsigned.apk
-          echo "Release compilation passed. This APK is UNSIGNED and intentionally not uploaded."
+          echo "Release compilation passed. This APK is UNSIGNED (for off-runner signing only)."
+      - name: Stage non-secret offline signing tools
+        run: |
+          mkdir -p staging/signing
+          cp android/app/build/outputs/apk/release/app-release-unsigned.apk staging/signing/Nerqo-Android-unsigned.apk
+          cp "$ANDROID_HOME/build-tools/36.0.0/lib/apksigner.jar" staging/signing/apksigner.jar
+          echo "Unsigned APK and official SDK signing tool staged; NO PRIVATE KEY."
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Nerqo-Android-Unsigned-For-Offline-Signing
+          path: staging/signing/*
       - uses: actions/upload-artifact@v4
         with:
           name: Nerqo-Android-Debug-Not-For-Updates
