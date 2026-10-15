@@ -7,5 +7,6 @@
     <Compile Include="../Nerqo.Desktop/Services/LanIdentity.cs" Link="LanIdentity.cs"/>
     <Compile Include="../Nerqo.Desktop/Services/WifiInspector.cs" Link="WifiInspector.cs"/>
     <Compile Include="../Nerqo.Desktop/Services/NativeUpdateService.cs" Link="NativeUpdateService.cs"/>
+    <Compile Include="../Nerqo.Desktop/Services/NativeDelta.cs" Link="NativeDelta.cs"/>
   </ItemGroup>
 </Project>

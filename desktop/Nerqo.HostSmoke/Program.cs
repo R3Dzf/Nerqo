@@ -14,6 +14,56 @@ if (!LanHost.IsCandidateAddress(System.Net.IPAddress.Parse("192.168.43.1"))
     || LanHost.IsCandidateAddress(System.Net.IPAddress.Parse("8.8.8.8"))
     || LanHost.IsCandidateAddress(System.Net.IPAddress.Loopback))
     throw new Exception("LAN address selection failed");
+
+static void TestNativeDelta()
+{
+    string folder = Path.Combine(Path.GetTempPath(), "nerqo-delta-test-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(folder);
+    try
+    {
+        byte[] original = Encoding.UTF8.GetBytes("native installed setup binary");
+        byte[] extra = Encoding.UTF8.GetBytes(" -- patched content");
+        byte[] updated = original.Concat(extra).ToArray();
+        string basePath = Path.Combine(folder, "old.exe"), patchPath = Path.Combine(folder, "update.nrqd");
+        string target = Path.Combine(folder, "new.exe"), corruptedTarget = Path.Combine(folder, "bad.exe");
+        File.WriteAllBytes(basePath, original);
+        using (var patch = File.Create(patchPath))
+        {
+            byte[] header = new byte[88];
+            Encoding.ASCII.GetBytes("NRQDEL01").CopyTo(header, 0);
+            System.Buffers.Binary.BinaryPrimitives.WriteUInt64BigEndian(header.AsSpan(8, 8), (ulong)original.Length);
+            System.Buffers.Binary.BinaryPrimitives.WriteUInt64BigEndian(header.AsSpan(16, 8), (ulong)updated.Length);
+            SHA256.HashData(original).CopyTo(header, 24);
+            SHA256.HashData(updated).CopyTo(header, 56);
+            patch.Write(header);
+            patch.WriteByte((byte)'C');
+            byte[] copy = new byte[12];
+            System.Buffers.Binary.BinaryPrimitives.WriteUInt32BigEndian(copy.AsSpan(8, 4), (uint)original.Length);
+            patch.Write(copy);
+            using var packed = new MemoryStream();
+            using (var z = new System.IO.Compression.ZLibStream(packed, System.IO.Compression.CompressionLevel.Optimal, leaveOpen:true))
+                z.Write(extra);
+            patch.WriteByte((byte)'D');
+            byte[] sizes = new byte[8];
+            System.Buffers.Binary.BinaryPrimitives.WriteUInt32BigEndian(sizes.AsSpan(0, 4), (uint)extra.Length);
+            System.Buffers.Binary.BinaryPrimitives.WriteUInt32BigEndian(sizes.AsSpan(4, 4), (uint)packed.Length);
+            patch.Write(sizes);
+            patch.Write(packed.ToArray());
+            patch.WriteByte((byte)'E');
+        }
+        NativeDelta.Apply(basePath, patchPath, target);
+        if (!updated.SequenceEqual(File.ReadAllBytes(target))) throw new Exception("Delta reconstruction was incorrect");
+        byte[] broken = File.ReadAllBytes(patchPath);
+        broken[87] ^= 0xff;  // Mutate declared target hash.
+        File.WriteAllBytes(patchPath, broken);
+        try { NativeDelta.Apply(basePath, patchPath, corruptedTarget); throw new Exception("Corrupt delta was accepted"); }
+        catch (InvalidDataException) { }
+        if (File.Exists(corruptedTarget)) throw new Exception("Corrupt reconstructed file was not deleted");
+    }
+    finally { Directory.Delete(folder, recursive: true); }
+}
+TestNativeDelta();
+
 await using var host = new LanHost();
 await host.StartAsync();
 await using (var secondInstance = new LanHost())
