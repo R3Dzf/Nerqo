@@ -76,7 +76,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Previous native installer failed' }
           ./tools/qa/windows_upgrade.ps1 -OldInstaller previous-native/dist/Installer/Nerqo-Windows-Setup.exe -NewInstaller dist/Installer/Nerqo-Windows-Setup.exe
           if ($LASTEXITCODE -ne 0) { throw 'Native upgrade verification failed' }
-          python tools/qa/windows_delta_budget.py --baseline-source previous-native/dist/Windows --target dist/Installer/Nerqo-Windows-Setup.exe
+          python tools/qa/windows_delta_budget.py --baseline-source previous-native/dist/Windows --baseline-version 1.0.8 --target dist/Installer/Nerqo-Windows-Setup.exe
           if ($LASTEXITCODE -ne 0) { throw 'Installer delta budget verification failed' }
       - uses: actions/upload-artifact@v4
         with:

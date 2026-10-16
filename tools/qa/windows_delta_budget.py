@@ -1,7 +1,7 @@
 """Measure actual native payload changes using the delta-friendly Windows packaging.
 
-The old 1.0.7 payload is repackaged for this test only. This is NOT the published
-1.0.7 installer, and does not imply a small migration delta from its old format.
+The previous native payload is repackaged for this test only. This is NOT the published
+previous installer, and does not imply a small migration delta from its old format.
 """
 from __future__ import annotations
 import argparse
@@ -20,6 +20,7 @@ from nerqo.delta import make_delta, apply_delta, file_digest
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--baseline-source', required=True, type=Path)
+    ap.add_argument('--baseline-version', required=True)
     ap.add_argument('--target', required=True, type=Path)
     ap.add_argument('--iscc', type=Path, default=Path(r'C:\Program Files (x86)\Inno Setup 6\ISCC.exe'))
     args = ap.parse_args()
@@ -47,7 +48,7 @@ def main():
                 raise ValueError('Installer delta reconstruction differs from target')
             ratio = patch.stat().st_size / args.target.stat().st_size
             report = {
-                'baseline_payload_version': '1.0.7',
+                'baseline_payload_version': args.baseline_version,
                 'baseline_repackaged_for_test': True,
                 'target_installer_bytes': args.target.stat().st_size,
                 'delta_bytes': patch.stat().st_size,

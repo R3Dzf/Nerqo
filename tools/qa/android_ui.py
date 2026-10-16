@@ -14,7 +14,7 @@ OUTPUT.mkdir(exist_ok=True)
 
 
 def adb(*args, binary=False):
-    return subprocess.check_output(['adb', *args], text=not binary)
+    return subprocess.check_output(['adb', *args], text=not binary, timeout=45)
 
 
 def capture(name):
@@ -31,7 +31,11 @@ def failure(message, tree=None):
     raise RuntimeError(message)
 
 
+launcher_recovered = False
+
+
 def tap(label, attr='text'):
+    global launcher_recovered
     tree = None
     for _ in range(12):
         try:
@@ -40,6 +44,21 @@ def tap(label, attr='text'):
         except (subprocess.CalledProcessError, ET.ParseError):
             time.sleep(2)
             continue
+        # A known disposable-emulator launcher ANR can cover the target app.
+        # Recover that exact external package once. Never dismiss a Nerqo ANR.
+        labels = [n.get('text', '') for n in tree.iter('node')]
+        if any(text.startswith("Quickstep isn't responding") for text in labels):
+            if launcher_recovered:
+                failure('Emulator launcher remained unresponsive', tree)
+            close = next((n for n in tree.iter('node') if n.get('text') == 'Close app'), None)
+            if close is not None:
+                bounds = list(map(int, re.findall(r'\d+', close.get('bounds', ''))))
+                if len(bounds) == 4:
+                    launcher_recovered = True
+                    (OUTPUT / 'launcher-recovery.txt').write_text('Closed the Quickstep launcher ANR once; full Nerqo UI/transport checks still required.\n')
+                    adb('shell', 'input', 'tap', str((bounds[0]+bounds[2])//2), str((bounds[1]+bounds[3])//2))
+                    adb('shell', 'am', 'start', '-W', '-n', 'com.r3dzf.nerqo/.MainActivity')
+                    continue
         for node in tree.iter('node'):
             if node.get(attr) == label:
                 parents = {child: parent for parent in tree.iter() for child in parent}
