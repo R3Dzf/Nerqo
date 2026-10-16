@@ -1,4 +1,4 @@
-name: Nerqo native Windows and Android preview
+name: Nerqo native Windows and Android CI
 on:
   workflow_dispatch:
   push:
@@ -34,7 +34,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: Nerqo-Native-Windows-Setup-Preview
-          path: dist/Installer/*.exe
+          path: dist/Installer/Nerqo-Windows-Setup.exe
       - uses: actions/upload-artifact@v4
         with:
           name: Nerqo-Native-Windows-Portable-Preview

@@ -11,9 +11,9 @@ from nerqo.delta import apply_delta
 class NativeReleaseTests(unittest.TestCase):
     def test_version_lockstep(self):
         project = Path(__file__).resolve().parents[1]
-        check_versions(project, "0.5.0")
+        check_versions(project, "1.0.0")
         with self.assertRaises(ValueError):
-            check_versions(project, "1.0.0")
+            check_versions(project, "0.5.0")
 
     def test_native_manifest_and_reconstruct_delta(self):
         with tempfile.TemporaryDirectory() as name:

@@ -1,19 +1,19 @@
 ; Nerqo per-user Windows installer: native WPF app and embedded .NET transfer service.
 ; No Python, shell or browser dependencies installed or launched.
 #define MyAppName "Nerqo"
-#define MyAppVersion "0.5.0"
+#define MyAppVersion "1.0.0"
 #define MyAppPublisher "R3Dzf"
 [Setup]
 AppId={{B36DB0B6-9931-4E92-8EDA-60C5E75F91C1}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
-AppVerName={#MyAppName} {#MyAppVersion} Native Preview
+AppVerName={#MyAppName} {#MyAppVersion}
 DefaultDirName={localappdata}\Programs\Nerqo
 DefaultGroupName=Nerqo
 PrivilegesRequired=lowest
 OutputDir={#SourcePath}..\dist\Installer
-OutputBaseFilename=Nerqo-Windows-Setup-Preview
+OutputBaseFilename=Nerqo-Windows-Setup
 WizardStyle=modern
 Compression=lzma2
 SolidCompression=yes

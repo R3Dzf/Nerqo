@@ -1,5 +1,7 @@
 name: Build and publish Nerqo native Stable
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
     inputs:
       version:
@@ -11,7 +13,21 @@ permissions:
   contents: read
 
 jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: version
+        shell: bash
+        run: |
+          TAG="v$(sed -n 's/.*versionName = "\\([0-9.]*\\)".*/\\1/p' android/app/build.gradle.kts)"
+          [[ "$TAG" =~ ^v[1-9][0-9]*\\.[0-9]+\\.[0-9]+$ ]]
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
   windows-native:
+    needs: version
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -28,7 +44,7 @@ jobs:
           choco install innosetup -y --no-progress
           & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" installer/Nerqo.iss
           New-Item -ItemType Directory -Force dist/StableWindows
-          Copy-Item dist/Installer/Nerqo-Windows-Setup-Preview.exe dist/StableWindows/Nerqo-Windows-Setup.exe
+          Copy-Item dist/Installer/Nerqo-Windows-Setup.exe dist/StableWindows/Nerqo-Windows-Setup.exe
       - uses: actions/upload-artifact@v4
         with:
           name: stable-windows-setup
@@ -36,6 +52,7 @@ jobs:
           if-no-files-found: error
 
   android-signed-verification:
+    needs: version
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -59,7 +76,7 @@ jobs:
         run: gradle :app:assembleRelease --no-daemon
       - name: Verify private-release-signed APK against reproducible payload
         env:
-          RELEASE_TAG: ${{ inputs.version }}
+          RELEASE_TAG: ${{ inputs.version || needs.version.outputs.tag }}
         shell: bash
         run: |
           set -euo pipefail
@@ -84,7 +101,7 @@ jobs:
   publish:
     # Never create a Stable release from a development/preview branch.
     if: github.ref == 'refs/heads/main'
-    needs: [windows-native, android-signed-verification]
+    needs: [version, windows-native, android-signed-verification]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -104,7 +121,7 @@ jobs:
       - name: Validate versions and compile update metadata
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ inputs.version }}
+          RELEASE_TAG: ${{ inputs.version || needs.version.outputs.tag }}
         shell: bash
         run: |
           set -euo pipefail
@@ -131,6 +148,6 @@ jobs:
       - name: Publish full installers and compatible deltas
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ inputs.version }}
+          RELEASE_TAG: ${{ inputs.version || needs.version.outputs.tag }}
         shell: bash
         run: gh release create "$RELEASE_TAG" staging/release/* --target "$GITHUB_SHA" --title "Nerqo $RELEASE_TAG" --generate-notes

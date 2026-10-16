@@ -488,7 +488,7 @@ class MainActivity : ComponentActivity() {
                         // disrupting Nerqo's offline LAN connection.
                         AppUpdater.check(this@MainActivity)
                     }) { Text("Check Android updates ↗") }
-                    Text("v0.5 native preview  ·  Trusted private LAN only", color = muted, fontSize = 11.sp)
+                    Text("v1.0.0  ·  Local secure transfers", color = muted, fontSize = 11.sp)
                     Spacer(Modifier.height(20.dp))
                 }
             }
