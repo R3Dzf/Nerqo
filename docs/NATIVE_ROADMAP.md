@@ -24,7 +24,7 @@ The actual MB/s is limited by negotiated Wi-Fi PHY, airtime contention, AP hardw
 | 02 Windows WPF | Initial implementation | Windows CI compilation and firewall test pending |
 | 03 Android Compose | Initial implementation | Android CI compilation and Android device test pending |
 | 04 Discover and pairing | Improved | Offline QR pair with TLS pin and PIN, UDP broadcast and manual IP fallback; DNS-SD and device-to-device test pending |
-| 05 Files, resume, integrity | Initial implementation | 4 MiB chunks, SHA-256, 2 TB policy, crash recovery; pause/resume UI and folders pending |
+| 05 Files, resume, integrity | In progress | 4 MiB chunks, SHA-256, resumable file upload; two-way folder selection now transfers a nested ZIP (including empty folders); native directory transfer without ZIP, large-folder pause/resume UX pending |
 | 06 Text and links | Initial implementation | Android Share intent, Windows UI, copy; clipboard opt-in pending |
 | 07 Encrypted transport | In progress | TLS + visual fingerprint verification; peer revocation and adversarial security tests pending |
 | 08 Hotspot / Wi-Fi Direct / Bluetooth | Partial | Android local-only hotspot started where supported; Wi-Fi Direct and Bluetooth transports not built |
@@ -55,3 +55,11 @@ Use **Refresh network and QR** in the Windows app after connecting to another Wi
 - Require SHA-256 of every native upload chunk; reject missing or incorrect digests before committing an offset.
 - Use NTFS hard links between Nerqo Storage and Windows Received to prevent duplicate disk usage for large Android uploads (copy fallback on unsupported volumes).
 - Windows native updater checks only newer stable GitHub releases, validates the native Installer asset and its manifest before downloading, verifies size and SHA-256, and obtains explicit permission before starting setup. It currently downloads the full installer; native installer Delta reconstruction and real-world upgrade acceptance tests remain outstanding.
+
+## Two-way folder transfer (first implementation)
+
+- Windows: **Choose folder to share (ZIP)** preserves nested files and empty folders. Symlinks and junctions are skipped. Archives are created directly inside the existing Nerqo Storage directory; no browser or console needed.
+- Android: **Send folder (ZIP)** uses the system Storage Access Framework document-tree picker. The app creates a temporary ZIP inside private cache and deletes it after upload, whether successful or failed. This temporarily needs additional phone free space; direct per-file folder streaming remains a future enhancement. A stopped folder upload currently restarts as a new ZIP upload instead of resuming, unlike normal file uploads.
+- Android/Windows receive the folder as a `.zip` file, with the original hierarchy intact; automatic safe extraction is not implemented yet.
+- Limits: up to 100,000 items, 64 directory levels and the existing 2 TB policy, additionally constrained by local free disk space and file-system capabilities.
+- Windows HostSmoke checks the ZIP member hierarchy, empty directory, sample contents and archive SHA-256; Android native builds must succeed before this is promoted.
