@@ -443,6 +443,8 @@ class MainActivity : ComponentActivity() {
                     val builder = android.net.wifi.WifiNetworkSpecifier.Builder().setSsid(parsed.ssid).setIsHiddenSsid(parsed.isHidden)
                     if (auth == "WPA3" || auth == "SAE") builder.setWpa3Passphrase(parsed.password ?: "")
                     else builder.setWpa2Passphrase(parsed.password ?: "")
+                    hotspotReservation?.close(); hotspotReservation = null; hotspotText = ""
+                    connected = false
                     val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
                     wifiRequest?.let { cm.unregisterNetworkCallback(it) }
                     requestedWifi = null
@@ -499,7 +501,7 @@ class MainActivity : ComponentActivity() {
         }
         task {
             var lastFailure: Exception? = null
-            for (candidate in candidates) {
+            for (candidate in candidates.filter { saved == null || it.address == saved.host }) {
                 try {
                     bindLocalNetwork()
                     val presented = NativeClient.previewIdentity(candidate)
@@ -563,8 +565,8 @@ class MainActivity : ComponentActivity() {
                     }
                     message = "Offline hotspot active. Band is chosen by Android/device."
                 }
-                override fun onStopped() { hotspotText = ""; message = "Hotspot stopped" }
-                override fun onFailed(reason: Int) { hotspotText = ""; message = "Hotspot unavailable ($reason). Use system hotspot settings." }
+                override fun onStopped() { hotspotReservation = null; hotspotText = ""; message = "Hotspot stopped" }
+                override fun onFailed(reason: Int) { hotspotReservation = null; hotspotText = ""; message = "Hotspot unavailable ($reason). Use system hotspot settings." }
             }
             // Use Android's generated WPA2/WPA3 credentials. Never create an open AP
             // just to request a frequency band unsupported by the public API.
