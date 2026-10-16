@@ -213,26 +213,18 @@ class MainActivity : ComponentActivity() {
         val access = token
         if (d == null || access == null) { message = "Pair with Windows first, then choose a folder"; return }
         task {
-            runOnUiThread { message = "Preparing folder archive…" }
-            val archive = FolderArchive.stage(this, treeUri) { count ->
-                runOnUiThread { message = "Packing folder: " + count + " entries" }
-            }
-            try {
-                NativeClient.sendFile(this, d, access, Uri.fromFile(archive), allowResume = false) { done, total ->
-                    runOnUiThread {
-                        progress = if (total <= 0) 1f else (done.toFloat() / total).coerceIn(0f, 1f)
-                        message = "Sending folder ZIP: " + "%.0f".format(progress * 100) + "%"
-                    }
-                }
-                val fresh = NativeClient.list(d, access)
+            runOnUiThread { message = "Sending folder directly without ZIP…" }
+            FolderTransfer.send(this, d, access, treeUri) { count, current, done, total ->
                 runOnUiThread {
-                    entries = fresh
-                    progress = 0f
-                    message = "Folder sent as a ZIP with its subfolders preserved"
+                    progress = if (total <= 0L) 0f else (done.toFloat() / total).coerceIn(0f, 1f)
+                    message = "Folder: " + count + " entries · " + current
                 }
-            } finally {
-                archive.delete()
-                archive.parentFile?.delete()
+            }
+            val fresh = NativeClient.list(d, access)
+            runOnUiThread {
+                entries = fresh
+                progress = 0f
+                message = "Folder transferred with nested files and empty folders"
             }
         }
     }
@@ -431,8 +423,8 @@ class MainActivity : ComponentActivity() {
                             Button(onClick = { picker.launch(arrayOf("*/*")) }, modifier = Modifier.fillMaxWidth(), enabled = !busy && token != null) { Text("↑  Choose files") }
                             Spacer(Modifier.height(8.dp))
                             OutlinedButton(onClick = { folderPicker.launch(null) }, modifier = Modifier.fillMaxWidth(),
-                                enabled = !busy && token != null) { Text("↑  Send folder (ZIP)") }
-                            Text("Keeps subfolders and empty folders; folder ZIPs need temporary phone storage.",
+                                enabled = !busy && token != null) { Text("↑  Send folder directly") }
+                            Text("Sends each file with resume; preserves subfolders without creating a ZIP.",
                                 color = muted, fontSize = 11.sp)
                             Spacer(Modifier.height(10.dp))
                             OutlinedTextField(value = shareText, onValueChange = { shareText = it }, label = { Text("Text or link") }, minLines = 2, modifier = Modifier.fillMaxWidth())

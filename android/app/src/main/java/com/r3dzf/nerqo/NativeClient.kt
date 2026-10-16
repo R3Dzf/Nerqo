@@ -167,7 +167,20 @@ internal object NativeClient {
         val type = if (message.trim().startsWith("https://") || message.trim().startsWith("http://")) "link" else "text"
         postJson(device.endpoint, "/api/items", JSONObject().put("kind", type).put("content", message), token)
     }
-    fun sendFile(context: Context, device: Device, token: String, uri: Uri, allowResume: Boolean = true, progress: (Long, Long) -> Unit) {
+    fun beginFolder(device: Device, token: String, name: String, resumeId: String? = null): String {
+        val payload = JSONObject().put("name", name)
+        if (resumeId != null) payload.put("resumeId", resumeId)
+        return postJson(device.endpoint, "/api/folders/begin", payload, token).getString("id")
+    }
+
+    fun createFolderDirectory(device: Device, token: String, folderId: String, relative: String) {
+        postJson(device.endpoint, "/api/folders/" + folderId + "/directory",
+            JSONObject().put("path", relative), token)
+    }
+
+    fun sendFile(context: Context, device: Device, token: String, uri: Uri, allowResume: Boolean = true,
+                 folderId: String? = null, relativePath: String? = null,
+                 progress: (Long, Long) -> Unit) {
         val resolver = context.contentResolver
         var size = -1L
         var name = "shared-file"
@@ -188,16 +201,39 @@ internal object NativeClient {
         }
         if (size < 0 || size > 2L * 1024 * 1024 * 1024 * 1024) throw IOException("Cannot determine file size")
         // Transfer identities survive interruptions for the same URI and same device.
-        val key = "resume_${device.address}_${sha(uri.toString().toByteArray())}"
+        val key = "resume_" + device.address + "_" +
+            sha((uri.toString() + "|" + size + "|" + (folderId ?: "") + "|" +
+                (relativePath ?: "")).toByteArray(Charsets.UTF_8))
         val prefs = context.getSharedPreferences("nerqo_native", Context.MODE_PRIVATE)
         val resume = if (allowResume) prefs.getString(key, null) else null
         val body = JSONObject().put("name", name).put("size", size)
+        if (folderId != null && relativePath != null) {
+            body.put("folderId", folderId)
+            body.put("relativePath", relativePath)
+        }
         if (resume != null) body.put("resumeId", resume)
         var transfer: JSONObject
         try { transfer = postJson(device.endpoint, "/api/transfers/begin", body, token) }
         catch (_: IOException) {
             prefs.edit().remove(key).apply()
             transfer = postJson(device.endpoint, "/api/transfers/begin", JSONObject().put("name", name).put("size", size), token)
+        }
+        if (transfer.optBoolean("complete", false)) {
+            val expected = transfer.getString("sha256")
+            val digest = MessageDigest.getInstance("SHA-256")
+            resolver.openInputStream(uri)?.use { input ->
+                val checkBuffer = ByteArray(256 * 1024)
+                while (true) {
+                    val n = input.read(checkBuffer)
+                    if (n < 0) break
+                    digest.update(checkBuffer, 0, n)
+                }
+            } ?: throw IOException("Cannot check previously transferred folder file")
+            if (shaDigest(digest) != expected)
+                throw IOException("This file changed since the folder transfer. Start a new folder transfer.")
+            prefs.edit().remove(key).apply()
+            progress(size, size)
+            return
         }
         val id = transfer.getString("id")
         var offset = transfer.getLong("offset")
