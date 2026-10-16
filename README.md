@@ -31,9 +31,9 @@ The old `app.py` / `web/` implementation is retained for migration tests only. I
 
 - File uploads: 4 MiB chunks, per-chunk SHA-256 and full-file verification, and resumable uploads after a disconnection.
 - Windows → Android: share one or more files, or select a folder. Folder structures (including empty folders) are preserved in a downloadable ZIP.
-- Android → Windows: send files with the document picker or Android's Share menu; use **Send folder (ZIP)** to transfer a SAF-selected folder.
+- Android → Windows: send files with the document picker or Android's Share menu; use **Send folder directly** to transfer an SAF-selected folder file by file, without temporary ZIP staging.
 - Both folder actions show archive preparation progress. Archives are files, **not automatically extracted** on the destination.
-- ZIP folder staging on Android currently needs enough temporary phone storage. If interrupted, a folder ZIP restarts; individual file uploads already support resume. A direct, no-staging folder transport is planned before the stable release.
+- Android direct folder transfer persists its folder session and each file’s resume offset. After a disconnect it verifies completed files by SHA-256 rather than uploading them twice. Windows → Android still uses a downloadable ZIP archive; direct receiving into an Android folder remains planned.
 
 ## Wi-Fi / hotspot performance
 
@@ -53,4 +53,4 @@ Android release signing uses a permanent, pinned public certificate fingerprint.
 
 The native CI compiles WPF and Android, runs transport tests and produces preview artifacts. The native Stable workflow is manual and gated: only a checked Windows Installer and a release-signed Android APK with matching, independently rebuilt payloads can be published from `main`. It does **not** publish the old Python/browser app.
 
-**Still pending for v1.0 Stable:** tested Wi-Fi Direct/Bluetooth fallbacks (where supported), safe direct folder transfer without ZIP staging, broader network diagnostics, real-device testing on Windows and Android, and verified in-place upgrades. Preview build success does not equal production readiness.
+**Still pending for v1.0 Stable:** direct Windows → Android folder transport (currently ZIP), tested Wi-Fi Direct/Bluetooth fallbacks (where supported), broader network diagnostics, real-device testing on Windows and Android, and verified in-place upgrades. Preview build success does not equal production readiness.

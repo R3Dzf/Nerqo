@@ -17,7 +17,17 @@ class NativeSigningTests(unittest.TestCase):
         self.assertIn("setContent { NativeScreen() }", android)
         self.assertNotIn("WebView", xaml)
         self.assertIn("Choose folder to share (ZIP)", xaml)
-        self.assertIn("Send folder (ZIP)", android)
+        self.assertIn("Send folder directly", android)
+        self.assertIn("FolderTransfer.send", android)
+        direct = (ROOT / "android/app/src/main/java/com/r3dzf/nerqo/FolderTransfer.kt").read_text()
+        native = (ROOT / "android/app/src/main/java/com/r3dzf/nerqo/NativeClient.kt").read_text()
+        host = (ROOT / "desktop/Nerqo.Desktop/Services/LanHost.cs").read_text()
+        self.assertIn("createFolderDirectory", direct)
+        self.assertIn("folderId = folderId, relativePath = path", direct)
+        self.assertIn('"/api/folders/begin"', host)
+        self.assertIn('"/api/folders/{id}/directory"', host)
+        self.assertIn("ValidFolderPath", host)
+        self.assertIn("NativeHttpException", native)
 
     def test_cert_fingerprint_public_without_private_key(self):
         cert = (ROOT / "android/RELEASE_SIGNING_CERT.sha256").read_text().strip()
