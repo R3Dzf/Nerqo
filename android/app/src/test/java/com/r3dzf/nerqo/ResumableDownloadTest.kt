@@ -8,8 +8,7 @@ import org.junit.Test
 class ResumableDownloadTest {
     private val data = ByteArray(9 * 1024 * 1024 + 123) { (it * 31).toByte() }
     private fun hash(bytes: ByteArray) = MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it.toInt() and 255) }
-    private class Target(val file: File) : DownloadTarget {
-        override val resumable = true
+    private class Target(val file: File, override val resumable: Boolean = true) : DownloadTarget {
         override fun length() = file.length()
         override fun read(): InputStream = file.inputStream()
         override fun writeAt(offset: Long): OutputStream {
@@ -76,6 +75,16 @@ class ResumableDownloadTest {
                     { DownloadResponse(206, "bytes 0-100/101", ByteArrayInputStream(byteArrayOf())) }, {}, { _, _ -> }, TransferControl())
             }
             assertArrayEquals(prefix, target.file.readBytes())
+        }
+    }
+    @Test fun nonSeekableProviderRestartsAtZeroInsteadOfAppending() {
+        Target(File.createTempFile("nerqo-pipe", ".part"), resumable = false).use { target ->
+            target.file.writeBytes(data.copyOf(1024))
+            var offset = -1L
+            ResumableDownload.copy(target, data.size.toLong(), hash(data), 1024,
+                { offset = it; remote(it) }, {}, { _, _ -> }, TransferControl())
+            assertEquals(0L, offset)
+            assertArrayEquals(data, target.file.readBytes())
         }
     }
     @Test fun zeroLengthDownloadTruncatesOwnedDestination() {

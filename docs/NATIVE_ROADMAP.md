@@ -1,6 +1,6 @@
 # Nerqo native implementation status
 
-Development branch: `dev/native-5ghz-20261016`. Native version: **1.0.1**.
+Development branch: `dev/native-5ghz-20261016`. Native version: **1.0.2**.
 This document records implementation and validation separately. A green build is
 not evidence of a successful transfer between physical Windows/Android devices.
 
@@ -12,11 +12,11 @@ not evidence of a successful transfer between physical Windows/Android devices.
 | 02 Windows | WPF WinExe; tray; normal per-user installer; drag/drop files and folders; Transfers/Devices/Settings; light/dark appearance | Physical installation/upgrade and firewall acceptance |
 | 03 Android | Kotlin/Compose; native document picker; Share intents; matching three-section UI; adaptive/themed launcher icon | Physical-phone lifecycle, accessibility and SAF-provider checks |
 | 04 Connection | Offline QR with pinned TLS fingerprint, UDP discovery, manual private IP, network/QR refresh | DNS-SD and multi-interface physical network checks |
-| 05 Files/folders | Both directions stream folders without ZIP; empty directories; chunk/final SHA-256; resumable uploads; verified completed-member retry on Android folder receiving; overall folder download progress | Mid-file Android download resume, explicit pause/cancel, overall upload ETA and large-directory benchmarking |
+| 05 Files/folders | Both directions stream folders without ZIP; empty directories; chunk/final SHA-256; resumable uploads and seekable downloads; retained Android jobs; explicit Pause/Resume/Cancel; verified completed-member retry; transfer speed/ETA; owner-bound idempotent upload receipts | Physical interruption/process-lifecycle checks, overall multi-file upload ETA and large-directory benchmarking |
 | 06 Text/links | Two-way text and links; copy; Android share target; explicit Paste button | Optional clipboard sync remains unimplemented; clipboard is read only on explicit Paste |
 | 07 Security | Persistent Windows TLS identity; QR/manual identity verification; Android pinning; revocable peer tokens; path/reparse checks | Independent audit and broader adversarial/lifecycle testing |
 | 08 Connection alternatives | Same LAN; normal phone hotspot; system-managed Android local-only hotspot with generated secure credentials | Native Wi-Fi Direct and Bluetooth transports are not implemented |
-| 09 Delivery/updates | WPF installer; permanent Android certificate pin; stable-only native updater; full/delta reconstruction; coordinated native versioning; source/payload/signing checks; per-user installer 1.0.0 → 1.0.1 tested on a Windows CI runner | Physical in-place upgrade; Windows Authenticode publisher signature; final acceptance before Stable |
+| 09 Delivery/updates | WPF installer; permanent Android certificate pin; stable-only native updater; full/delta reconstruction; coordinated native versioning; source/payload/signing checks; per-user installer 1.0.1 → 1.0.2 tested on a Windows CI runner | Physical in-place upgrade; Windows Authenticode publisher signature; final acceptance before Stable |
 
 ## UI and identity (1.0.1)
 
@@ -32,15 +32,25 @@ a file. Windows PNG/ICO and Android vector/adaptive/monochrome resources impleme
 the same mark. No browser, console, Python interpreter or cloud relay is launched
 by the native apps.
 
-## Folder receive retry
+## Saved transfers and folder recovery (1.0.2)
+
+Android retains the active transfer job and document permissions. Pause closes
+active requests and document streams; Resume reopens and verifies saved state.
+Uploads require Windows transfer protocol 2 so a committed file whose finish
+reply was lost is verified and acknowledged instead of uploaded a second time.
+Another paired sender cannot claim or cancel the original sender's session.
 
 Select the same Windows share and the same Android destination tree after an
 interruption. Completed files are skipped only when a saved receipt belongs to
 that transfer/destination **and** reading the current saved bytes reproduces the
 manifest's size and SHA-256. Changed or unrelated existing files are preserved
-and reported as conflicts. The active incomplete file starts again; this is
-whole-folder retry at file boundaries, not mid-file byte resume. The app shows
-overall bytes for folder receiving. Receipts persist through app restarts.
+and reported as conflicts. The active incomplete file resumes from the last
+4 MiB checkpoint when the SAF destination is seekable; providers exposing only
+pipes safely restart that member. A server ignoring Range causes a clean restart,
+never appending a whole response to an existing prefix. Full-file SHA-256 must
+match before folder members are renamed to their final names. Cancel cleans
+tracked unverified partials and preserves verified members. The app shows overall
+bytes for folder receiving. Receipts persist through app restarts.
 
 ## Wi-Fi performance
 
@@ -55,12 +65,17 @@ hardware.
 
 - Native CI builds WPF, runs the authenticated LAN/integrity/Delta smoke suite,
   captures real WPF screens, and builds Android Debug and unsigned Release APKs.
-- Android 35 emulator UI smoke navigates the actual Compose screens and captures light/dark output, including system-bar contrast.
+- Android 35 emulator UI smoke is configured for actual TLS/SAF interrupted downloads, folder retry, a deliberately lost upload-finish reply and cancellation, followed by Compose Pause/Resume and output hash verification. The latest fixture-grant correction is pending execution; do not count the earlier permission failure as a passing transport check.
 - Android JVM tests exercise the saved-member integrity decision with exact,
   empty, truncated, oversized and same-size altered content.
+- The current 1.0.2 local JVM run passed all 15 tests: saved-member integrity,
+  byte-range resume, malformed/ignored ranges, altered/truncated content,
+  nonseekable storage and responsive asynchronous stop. The Python regression
+  suite passed 36 tests with one skipped. These do not replace emulator or
+  physical-device acceptance.
 - The Stable workflow only publishes from `main`, with both platforms successful
   and a permanent-key-signed APK matching the independently compiled payload.
-- Installer upgrade smoke installs the previous native 1.0.0 build, upgrades to 1.0.1, and checks the persistent TLS identity, authorized device token, shared note and received file. This runs on a disposable Windows CI runner, not the user’s PC.
+- Installer upgrade smoke installs the previous native 1.0.1 build, upgrades to 1.0.2, and checks the persistent TLS identity, authorized device token, shared note and received file. This passed on a disposable Windows CI runner, not the user’s PC.
 - A debug APK is for development testing. It cannot update the permanent-key
   installation; do not uninstall the stable installation to try it.
 - The signing private key remains outside the public repository. Builds here do

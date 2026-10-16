@@ -34,7 +34,7 @@ internal object ResumableDownload {
         fun hashPrefix() {
             if (offset == 0L) return
             control.phase("Verifying the saved download before resuming…")
-            target.read().use { input ->
+            target.read().use { input -> control.resource(input) {
                 val block = ByteArray(256 * 1024)
                 var count = 0L
                 while (count < offset) {
@@ -43,7 +43,7 @@ internal object ResumableDownload {
                     if (n <= 0) throw IOException("Saved download prefix is incomplete")
                     digest.update(block, 0, n); count += n
                 }
-            }
+            } }
         }
         fun verify() {
             val expected = sha256.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
@@ -73,7 +73,7 @@ internal object ResumableDownload {
                     }
                     else -> throw IOException("Download unavailable: HTTP ${response.status}")
                 }
-                target.writeAt(offset).use { output ->
+                target.writeAt(offset).use { output -> control.resource(output) {
                     var lastCheckpoint = offset
                     val block = ByteArray(256 * 1024)
                     progress(offset, size)
@@ -93,7 +93,7 @@ internal object ResumableDownload {
                     if (offset != size) throw IOException("Connection ended before the file was complete")
                     verify()
                     checkpoint(size)
-                }
+                } }
             }
         } catch (failure: TransferIntegrityFailure) {
             // Only the caller-owned partial document is reset; it is never published.

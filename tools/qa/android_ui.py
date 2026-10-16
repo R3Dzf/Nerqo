@@ -1,8 +1,9 @@
 """Capture the actual Compose app on an attached Android test emulator.
 
-This smoke path navigates existing UI; it never pairs or injects fake transfers.
+Instrumentation leaves a real, interrupted TLS/SAF download for UI recovery.
 """
 from pathlib import Path
+import hashlib
 import re
 import subprocess
 import time
@@ -65,6 +66,11 @@ for _ in range(25):
 else:
     raise RuntimeError('Native UI transfer did not complete after resume')
 capture('Transfers')
+received = adb('exec-out', 'run-as', 'com.r3dzf.nerqo.test', 'cat', 'cache/transport-fixtures/ui-resume.bin', binary=True)
+expected = bytes(range(256)) * (32 * 4096) + b'ui'
+if hashlib.sha256(received).digest() != hashlib.sha256(expected).digest():
+    raise RuntimeError('UI-resumed document does not match the TLS source')
+(OUTPUT / 'transfer-verification.txt').write_text('PASS: restored download; native Pause/Resume; final size and SHA-256 match source.\n')
 tap('Settings')
 capture('Settings')
 tap('Dark appearance', 'content-desc')

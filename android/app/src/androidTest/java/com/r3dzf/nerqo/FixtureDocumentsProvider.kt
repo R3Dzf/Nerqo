@@ -20,12 +20,7 @@ class FixtureDocumentsProvider : DocumentsProvider() {
         return item
     }
     private fun id(file: File) = if (file == root) "root" else "root/" + file.relativeTo(root).invariantSeparatorsPath
-    override fun onCreate(): Boolean {
-        context!!.grantUriPermission("com.r3dzf.nerqo", android.net.Uri.parse("content://com.r3dzf.nerqo.test.documents"),
-            android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION or
-                android.content.Intent.FLAG_GRANT_PREFIX_URI_PERMISSION or android.content.Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
-        return true
-    }
+    override fun onCreate() = true
     override fun queryRoots(projection: Array<out String>?): Cursor {
         val columns = projection ?: arrayOf(Root.COLUMN_ROOT_ID, Root.COLUMN_DOCUMENT_ID, Root.COLUMN_TITLE, Root.COLUMN_FLAGS)
         return MatrixCursor(columns).apply { addRow(columns.map { when(it) {

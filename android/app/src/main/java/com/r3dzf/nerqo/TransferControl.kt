@@ -14,12 +14,22 @@ internal class TransferControl(private val onPhase: (String) -> Unit = {}) {
     private val gate = Any()
     private val connections = mutableMapOf<Any, () -> Unit>()
 
-    fun interrupt(reason: TransferStop) {
+    fun interrupt(reason: TransferStop, closeAsync: Boolean = false) {
         val actions = synchronized(gate) {
             if (stop != TransferStop.CANCEL) stop = reason
             connections.values.toList()
         }
-        actions.forEach { runCatching(it) }
+        val close = { actions.forEach { runCatching(it) } }
+        // Some providers and HTTP implementations block close() behind a read.
+        // UI callers set the stop flag synchronously, then close off the UI thread.
+        if (closeAsync && actions.isNotEmpty()) Thread(close, "Nerqo-transfer-stop").apply { isDaemon = true; start() }
+        else close()
+    }
+    fun <T> resource(value: java.io.Closeable, action: () -> T): T {
+        try {
+            attach(value) { value.close() }
+            return action()
+        } finally { detach(value) }
     }
     fun phase(label: String) { onPhase(label) }
     fun checkpoint() {

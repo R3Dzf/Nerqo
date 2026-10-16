@@ -90,8 +90,10 @@ internal object FolderReceiver {
                 // Never overwrite an unrelated user file, or trust a receipt without hashing.
                 TransferControl.current.get()?.phase("Verifying saved folder member: " + relative)
                 val owned = prefs.getString(receiptKey, null) == hash + "|" + existing.uri
-                val matches = owned && existing.isFile && context.contentResolver.openInputStream(existing.uri)?.use {
-                    TransferIntegrity.matches(it, expectedSize, hash)
+                val matches = owned && existing.isFile && context.contentResolver.openInputStream(existing.uri)?.use { input ->
+                    val control = TransferControl.current.get()
+                    if (control == null) TransferIntegrity.matches(input, expectedSize, hash)
+                    else control.resource(input) { TransferIntegrity.matches(input, expectedSize, hash) }
                 } == true
                 if (!matches) throw IOException("Destination already contains a different or unverified file: " + relative)
                 completed += expectedSize
@@ -107,7 +109,6 @@ internal object FolderReceiver {
             if (!prefs.edit().putString(partialKey, JSONObject().put("uri", staging.uri.toString()).put("name", staging.name)
                     .put("sha256", hash).put("size", expectedSize).toString()).commit())
                 throw IOException("Cannot save partial folder member identity")
-            var finalized = false
             try {
                 NativeClient.saveOutgoingFolderFile(context, device, token, id, relative, expectedSize,
                     hash, staging.uri, sessionId) { done, _ ->
@@ -115,7 +116,6 @@ internal object FolderReceiver {
                 }
                 if (!staging.renameTo(destinationName))
                     throw IOException("Storage provider could not finalize " + relative)
-                finalized = true
                 if (!prefs.edit().putString(receiptKey, hash + "|" + staging.uri).remove(partialKey).commit())
                     throw IOException("Could not save the folder retry receipt")
                 completed += expectedSize

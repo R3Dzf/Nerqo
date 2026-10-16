@@ -27,7 +27,21 @@ class NativeTransportTest {
     private fun uri(name: String) = DocumentsContract.buildDocumentUri(authority, "root/$name")
     private fun session() = UUID.randomUUID().toString()
     @Before fun trustKnownFixture() {
-        context.contentResolver.query(DocumentsContract.buildDocumentUri(authority, "root"), null, null, null, null)?.use {
+        // Starting instrumentation force-stops the target and revokes transient
+        // URI grants. Ask the separate fixture owner after instrumentation starts.
+        context.startActivity(android.content.Intent().setClassName("com.r3dzf.nerqo.test",
+            "com.r3dzf.nerqo.FixtureGrantActivity").addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+        val root = DocumentsContract.buildDocumentUri(authority, "root")
+        val tree = DocumentsContract.buildTreeDocumentUri(authority, "root")
+        val flags = android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+        val deadline = android.os.SystemClock.uptimeMillis() + 5000
+        fun allowed(uri: Uri) = context.checkUriPermission(uri, android.os.Process.myPid(), android.os.Process.myUid(), flags) ==
+            android.content.pm.PackageManager.PERMISSION_GRANTED
+        while ((!allowed(root) || !allowed(tree)) && android.os.SystemClock.uptimeMillis() < deadline)
+            Thread.sleep(100)
+        check(allowed(root) && allowed(tree)) { "Fixture owner did not grant document access" }
+        context.contentResolver.takePersistableUriPermission(tree, flags)
+        context.contentResolver.query(root, null, null, null, null)?.use {
             assertTrue(it.moveToFirst())
         } ?: error("Test storage did not start")
         NativeClient.trustIdentity(device, fingerprint)
@@ -84,15 +98,20 @@ class NativeTransportTest {
         NativeClient.cleanSession(context, device, token, id, cancel = false)
     }
     @Test fun test04CancelRemovesUnverifiedOwnedPartial() {
-        val target = uri("cancel.bin")
-        val id = session()
-        val entry = SharedEntry("1".repeat(32), "file", device.name, "cancel.bin", data.size.toLong(), hash(data))
-        val control = TransferControl()
-        assertThrows(IOException::class.java) {
-            control.run { NativeClient.download(context, device, token, entry, target, id) { done, _ -> pauseAtFourMiB(control, done) } }
+        // Include a stop before the first byte/checkpoint, as well as mid-file.
+        for (stopAfter in listOf(0L, 4L * 1024 * 1024)) {
+            val target = uri("cancel.bin")
+            val id = session()
+            val entry = SharedEntry("1".repeat(32), "file", device.name, "cancel.bin", data.size.toLong(), hash(data))
+            val control = TransferControl()
+            assertThrows(IOException::class.java) {
+                control.run { NativeClient.download(context, device, token, entry, target, id) { done, _ ->
+                    if (done >= stopAfter) control.interrupt(TransferStop.PAUSE)
+                } }
+            }
+            NativeClient.cleanSession(context, device, token, id, cancel = true)
+            assertFalse(DocumentFile.fromSingleUri(context, target)!!.exists())
         }
-        NativeClient.cleanSession(context, device, token, id, cancel = true)
-        assertFalse(DocumentFile.fromSingleUri(context, target)!!.exists())
     }
     @Test fun test99LeaveRealPausedTransferForUiResumeTest() {
         val content = ByteArray(32 * 1024 * 1024) { it.toByte() } + "ui".toByteArray()

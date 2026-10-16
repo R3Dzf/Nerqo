@@ -188,6 +188,13 @@ internal object NativeClient {
             JSONObject().put("path", relative), token)
     }
 
+    private fun <T> readSource(context: Context, uri: Uri, action: (java.io.InputStream) -> T): T {
+        val input = context.contentResolver.openInputStream(uri) ?: throw IOException("Cannot open selected source")
+        input.use {
+            val control = TransferControl.current.get()
+            return if (control == null) action(input) else control.resource(input) { action(input) }
+        }
+    }
     fun sendFile(context: Context, device: Device, token: String, uri: Uri, allowResume: Boolean = true,
                  folderId: String? = null, relativePath: String? = null, sessionId: String? = null,
                  progress: (Long, Long) -> Unit) {
@@ -240,7 +247,7 @@ internal object NativeClient {
             TransferControl.current.get()?.phase("Checking the already delivered file…")
             val expected = transfer.getString("sha256")
             val digest = MessageDigest.getInstance("SHA-256")
-            resolver.openInputStream(uri)?.use { input ->
+            readSource(context, uri) { input ->
                 val checkBuffer = ByteArray(256 * 1024)
                 while (true) {
                     TransferControl.check()
@@ -248,7 +255,7 @@ internal object NativeClient {
                     if (n < 0) break
                     digest.update(checkBuffer, 0, n)
                 }
-            } ?: throw IOException("Cannot check previously transferred folder file")
+            }
             if (shaDigest(digest) != expected)
                 throw IOException("This file changed since the folder transfer. Start a new folder transfer.")
             if (sessionId == null) prefs.edit().remove(key).apply()
@@ -263,7 +270,7 @@ internal object NativeClient {
         if (offset !in 0..size) throw IOException("Invalid upload resume offset")
         if (allowResume) prefs.edit().putString(key, id).apply()
         val wholeFileDigest = MessageDigest.getInstance("SHA-256")
-        resolver.openInputStream(uri)?.use { input ->
+        readSource(context, uri) { input ->
             // Read and hash the already-transferred prefix too. A document
             // provider may not implement InputStream.skip(), and hashing the
             // prefix detects changed files after a suspended upload.
@@ -307,7 +314,7 @@ internal object NativeClient {
             }
             TransferControl.check()
             if (input.read() != -1) throw IOException("Source file grew during transfer. Start a new transfer.")
-        } ?: throw IOException("Cannot open selected file")
+        }
         val expectedFileHash = shaDigest(wholeFileDigest)
         postJson(device.endpoint, "/api/transfers/$id/finish?sha256=" + expectedFileHash,
             JSONObject(), token)
@@ -325,7 +332,12 @@ internal object NativeClient {
         val prefs = context.getSharedPreferences("nerqo_downloads", Context.MODE_PRIVATE)
         val key = "download_" + sessionId + "_" + sha((device.endpoint + "|" + path + "|" + target + "|" + expectedSha + "|" + size).toByteArray())
         val record = JSONObject().put("uri", target.toString()).put("offset", 0).put("verified", false)
-        val previous = prefs.getString(key, null)?.let { JSONObject(it).getLong("offset") } ?: 0L
+        val saved = prefs.getString(key, null)?.let { JSONObject(it) }
+        val previous = saved?.getLong("offset") ?: 0L
+        // Record ownership before the first network request, so Cancel can
+        // remove our destination even if the connection fails before 4 MiB.
+        record.put("offset", previous).put("verified", saved?.optBoolean("verified", false) ?: false)
+        if (!prefs.edit().putString(key, record.toString()).commit()) throw IOException("Could not save download session")
         val control = TransferControl.current.get() ?: TransferControl()
         SafDownloadTarget(context, target).use { destination ->
             ResumableDownload.copy(destination, size, expectedSha, previous, remote = { offset ->

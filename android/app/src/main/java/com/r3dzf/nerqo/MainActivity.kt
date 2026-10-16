@@ -241,14 +241,14 @@ class MainActivity : ComponentActivity() {
     private fun receiveFolder(entry: SharedEntry, target: Uri) = createTransfer("downloadFolder", "Save folder: " + entry.content, target = target, entry = entry)
 
     private fun pauseTransfer() {
-        transferControl?.interrupt(TransferStop.PAUSE)
+        transferControl?.interrupt(TransferStop.PAUSE, closeAsync = true)
         transferUi = transferUi?.copy(detail = "Pausing at the last safe checkpoint…")
     }
     private fun cancelTransfer() {
         val job = pendingTransfer ?: return
         if (busy && transferControl == null) { message = "Connection check in progress. Try Cancel again shortly."; return }
         if (busy) {
-            transferControl?.interrupt(TransferStop.CANCEL)
+            transferControl?.interrupt(TransferStop.CANCEL, closeAsync = true)
             transferUi = transferUi?.copy(detail = "Cancelling… Completed files will be kept.")
         } else {
             // Run cleanup on the same serial executor, with no second document writer.
@@ -468,7 +468,7 @@ class MainActivity : ComponentActivity() {
         }
     }
     override fun onDestroy() {
-        transferControl?.interrupt(TransferStop.PAUSE)
+        transferControl?.interrupt(TransferStop.PAUSE, closeAsync = true)
         hotspotReservation?.close()
         (getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager).bindProcessToNetwork(null)
         executor.shutdownNow()
