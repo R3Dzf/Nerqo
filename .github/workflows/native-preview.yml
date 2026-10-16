@@ -44,6 +44,20 @@ jobs:
         run: |
           choco install innosetup -y --no-progress
           & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" installer/Nerqo.iss
+      - name: Build previous native installer and verify in-place upgrade
+        shell: pwsh
+        run: |
+          git fetch --depth 1 origin 5bd11dad3d17ff066f2f2e1659750dc3cb6b8e96
+          git worktree add --detach previous-native 5bd11dad3d17ff066f2f2e1659750dc3cb6b8e96
+          dotnet publish previous-native/desktop/Nerqo.Desktop/Nerqo.Desktop.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:PublishReadyToRun=false -o previous-native/dist/Windows
+          if ($LASTEXITCODE -ne 0) { throw 'Previous native publish failed' }
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" previous-native/installer/Nerqo.iss
+          if ($LASTEXITCODE -ne 0) { throw 'Previous native installer failed' }
+          ./tools/qa/windows_upgrade.ps1 -OldInstaller previous-native/dist/Installer/Nerqo-Windows-Setup.exe -NewInstaller dist/Installer/Nerqo-Windows-Setup.exe
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Nerqo-Windows-Upgrade-Verification
+          path: dist/qa/windows-upgrade.txt
       - uses: actions/upload-artifact@v4
         with:
           name: Nerqo-Native-Windows-Setup-Preview
