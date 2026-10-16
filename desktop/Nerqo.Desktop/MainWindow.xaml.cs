@@ -165,6 +165,8 @@ public partial class MainWindow : Window
         var incoming = service.Incoming;
         if (!displayedIncoming.SequenceEqual(incoming)) { displayedIncoming = incoming; IncomingList.ItemsSource = incoming; }
         EmptyIncomingLabel.Visibility = incoming.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        HistoryWarningLabel.Text = service.HistoryWarning;
+        HistoryWarningLabel.Visibility = service.HistoryWarning.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
         var history = service.History;
         if (!displayedHistory.SequenceEqual(history)) { displayedHistory = history; RenderHistory(); }
         EmptyPeersLabel.Visibility = peers.Count == 0 ? Visibility.Visible : Visibility.Collapsed;

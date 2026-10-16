@@ -74,7 +74,6 @@ internal sealed class PersistedData
     public Dictionary<string, FolderRecord> Folders { get; set; } = new();
     public Dictionary<string, OutgoingFolder> OutgoingFolders { get; set; } = new();
     public List<TransferItem> Items { get; set; } = new();
-    public List<TransferHistoryEntry> History { get; set; } = new();
 }
 
 /// <summary>Pure .NET, in-process LAN transfer service. No Python, shell or embedded web browser.</summary>
@@ -89,6 +88,9 @@ public sealed class LanHost : IAsyncDisposable
     private readonly ConcurrentDictionary<string, OutgoingFolder> outgoingFolders = new();
     private readonly string root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Nerqo");
     private PersistedData state = new();
+    private List<TransferHistoryEntry> history = new();
+    private bool historyWritable = true;
+    public string HistoryWarning { get; private set; } = "";
     private readonly X509Certificate2 tlsCertificate;
     public string ServerFingerprint => tlsCertificate.GetCertHashString(HashAlgorithmName.SHA256).ToLowerInvariant();
     public string PairingIdentity => ServerFingerprint[..12].ToUpperInvariant();
@@ -101,13 +103,24 @@ public sealed class LanHost : IAsyncDisposable
     public event Action? Changed;
     public List<TransferItem> Items { get { lock (gate) return state.Items.OrderByDescending(x => x.Created).Take(150).Select(x => x).ToList(); } }
     public List<PairedDevice> PairedDevices { get { lock (gate) return state.Peers.Where(x => x.Value.Expires > DateTimeOffset.UtcNow).Select(x => new PairedDevice(x.Key, x.Value.Name, x.Value.Expires)).OrderBy(x => x.Name).ToList(); } }
-    public List<TransferHistoryEntry> History { get { lock (gate) return state.History.OrderByDescending(x => x.When).Take(500).ToList(); } }
+    public List<TransferHistoryEntry> History { get { lock (gate) return history.OrderByDescending(x => x.When).Take(500).ToList(); } }
     public List<IncomingTransfer> Incoming { get { lock (gate) return state.Uploads.Values.Select(x => new IncomingTransfer(x.Name, x.Offset, x.Size)).ToList(); } }
     private void RecordHistory(string key, string name, string peer, string direction, string status, long size)
     {
-        if (state.History.Any(x => x.Key == key)) return;
-        state.History.Add(new(key, name, peer, direction, status, size, DateTimeOffset.UtcNow));
-        if (state.History.Count > 500) state.History.RemoveRange(0, state.History.Count - 500);
+        if (history.Any(x => x.Key == key)) return;
+        history.Add(new(key, name, peer, direction, status, size, DateTimeOffset.UtcNow));
+        if (history.Count > 500) history.RemoveRange(0, history.Count - 500);
+        if (!historyWritable) return;
+        // The log is separate from frequent upload checkpoints. Logging failures must not fail a verified delivery.
+        string target = Path.Combine(root, "history.json");
+        try
+        {
+            File.WriteAllText(target + ".tmp", JsonSerializer.Serialize(history));
+            File.Move(target + ".tmp", target, true);
+            HistoryWarning = "";
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        { HistoryWarning = "History could not be saved. New entries are currently in memory only."; }
     }
     public bool RevokePeer(string tokenHash)
     {
@@ -156,7 +169,6 @@ public sealed class LanHost : IAsyncDisposable
             try
             {
                 state = JsonSerializer.Deserialize<PersistedData>(File.ReadAllText(data)) ?? new();
-                state.History ??= new();
                 state.Folders ??= new();
                 state.CompletedUploads ??= new();
                 state.OutgoingFolders ??= new();
@@ -164,6 +176,14 @@ public sealed class LanHost : IAsyncDisposable
                     if (Directory.Exists(entry.Value.Root)) outgoingFolders[entry.Key] = entry.Value;
             }
             catch (JsonException) { throw new IOException("Cannot safely load saved Nerqo state; restore state.json from backup."); }
+        string historyFile = Path.Combine(root, "history.json");
+        if (File.Exists(historyFile))
+            try { history = (JsonSerializer.Deserialize<List<TransferHistoryEntry>>(File.ReadAllText(historyFile)) ?? new()).TakeLast(500).ToList(); }
+            catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
+            {
+                historyWritable = false;
+                HistoryWarning = "Saved History could not be read. Its file is unchanged; new entries are currently in memory only.";
+            }
     }
     private void Save()
     {
