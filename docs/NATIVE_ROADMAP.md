@@ -1,6 +1,6 @@
 # Nerqo native implementation status
 
-Stable LAN/hotspot channel: **1.0.7**. Development branch: `dev/native-5ghz-20261016`.
+Stable LAN/hotspot channel: **1.0.8**. Development branch: `dev/native-5ghz-20261016`.
 This document records implementation and validation separately. A green build is
 not evidence of a successful transfer between physical Windows/Android devices.
 
@@ -16,14 +16,14 @@ be exited once before the first launch of this update.
 | Phase | Implemented | Remaining |
 |---|---|---|
 | 01 Native transport | In-process Kestrel HTTPS; native Android client; authenticated streaming APIs | Physical-device, sleep/resume and router interoperability |
-| 02 Windows | WPF WinExe; tray; normal per-user installer; drag/drop files and folders; Transfers/Devices/Settings; light/dark appearance | Physical installation/upgrade and firewall acceptance |
-| 03 Android | Kotlin/Compose; native document picker; Share intents; matching three-section UI; adaptive/themed launcher icon | Physical-phone lifecycle, accessibility and SAF-provider checks |
+| 02 Windows | WPF WinExe; tray; normal per-user installer; drag/drop files and folders; Transfers/History/Devices/Settings; light/dark appearance | Physical installation/upgrade and firewall acceptance |
+| 03 Android | Kotlin/Compose; native document picker; Share intents; Transfers/Devices/Settings/History UI; adaptive/themed launcher icon | Physical-phone lifecycle, accessibility and SAF-provider checks |
 | 04 Connection | Offline QR with pinned TLS fingerprint, UDP discovery, manual private IP, network/QR refresh | DNS-SD and multi-interface physical network checks |
 | 05 Files/folders | Both directions stream folders without ZIP; empty directories; chunk/final SHA-256; resumable uploads and seekable downloads; retained Android jobs; explicit Pause/Resume/Cancel; verified completed-member retry; transfer speed/ETA; owner-bound idempotent upload receipts | Physical interruption/process-lifecycle checks, overall multi-file upload ETA and large-directory benchmarking |
 | 06 Text/links | Two-way text and links; copy; Android share target; explicit Paste button | Optional clipboard sync remains unimplemented; clipboard is read only on explicit Paste |
 | 07 Security | Persistent Windows TLS identity; QR/manual identity verification; Android pinning; revocable peer tokens; path/reparse checks | Independent audit and broader adversarial/lifecycle testing |
 | 08 Connection alternatives | Same LAN; normal phone hotspot; system-managed Android local-only hotspot with generated secure credentials | Native Wi-Fi Direct and Bluetooth transports are not implemented |
-| 09 Delivery/updates | WPF installer; permanent Android certificate pin; stable-only native updater; full/delta reconstruction; coordinated native versioning; source/payload/signing checks; per-user installer 1.0.6 → 1.0.7 replacement tested on a Windows CI runner | Physical in-place upgrade; Windows Authenticode publisher signature; broader physical-device acceptance |
+| 09 Delivery/updates | WPF installer; permanent Android certificate pin; stable-only native updater; full/delta reconstruction; coordinated native versioning; source/payload/signing checks; per-user installer 1.0.7 → 1.0.8 replacement tested on a Windows CI runner | Physical in-place upgrade; Windows Authenticode publisher signature; broader physical-device acceptance |
 
 ## UI and identity (1.0.1)
 
@@ -124,3 +124,14 @@ keyboard focus and persistent light/dark state. CI exercises the actual Toggle
 provider and color/persistence changes, captures Settings in both themes, and
 creates/verifies/removes narrow Firewall rules on a disposable Windows runner.
 The secure-desktop UAC interaction is still a physical-user acceptance item.
+
+## Transfer preparation and local History (1.0.8)
+
+Windows snapshot copying and SHA-256 calculation share a single pass with
+preparation progress; an incoming queue is shown separately from terminal
+History. Android records the latest status of each file/folder job across
+restarts. Windows records received files, cancelled/integrity-failed uploads
+and best-effort verified delivery acknowledgements from the updated client.
+Neither platform treats an available share as proof of completed delivery.
+History has search/status filters and a 500-entry bound. Physical throughput
+benchmarks and Android foreground transfer services remain future work.
