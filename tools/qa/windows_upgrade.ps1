@@ -20,7 +20,7 @@ function Install-Nerqo([string]$installer) {
 }
 function Start-Nerqo {
     Write-Host "Starting installed app: $appPath"
-    $script:appProcess = Start-Process -FilePath $appPath -PassThru
+    $script:appProcess = Start-Process -FilePath $appPath -ArgumentList '--upgrade-smoke' -PassThru
     for ($attempt = 0; $attempt -lt 30; $attempt++) {
         if ($script:appProcess.HasExited) { throw 'Installed native app exited unexpectedly' }
         try {

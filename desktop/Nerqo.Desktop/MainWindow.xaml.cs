@@ -24,6 +24,7 @@ public partial class MainWindow : Window
     private bool exiting;
     private bool preparing;
     private bool loadingTheme = true;
+    private bool receiverStarted;
     private FirewallStatus? firewallStatus;
     private readonly string firewallPromptFile = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Nerqo", "firewall-prompt-v1.txt");
     private readonly string themeFile = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Nerqo", "appearance.txt");
@@ -48,12 +49,15 @@ public partial class MainWindow : Window
     {
         try
         {
+            bool smoke = Environment.GetCommandLineArgs().Contains("--ui-smoke");
+            // Check before listening so our consent flow can install precise rules
+            // before Windows considers displaying its generic app permission prompt.
+            await RefreshFirewallAsync(!smoke && !Environment.GetCommandLineArgs().Contains("--upgrade-smoke"));
             await service.StartAsync();
-            StatusLabel.Text = "●  Ready on local network";
+            receiverStarted = true;
+            UpdateFirewallHeader();
             await UpdateNetworkAndQrAsync();
             SetupTray(); RefreshItems();
-            bool smoke = Environment.GetCommandLineArgs().Contains("--ui-smoke");
-            await RefreshFirewallAsync(!smoke);
             if (smoke) await CaptureUiSmokeAsync();
         }
         catch (Exception ex)
@@ -238,6 +242,17 @@ public partial class MainWindow : Window
         FirewallCard.Visibility = firewallStatus?.State == "ready" && TransfersPage.Visibility == Visibility.Visible
             ? Visibility.Collapsed : Visibility.Visible;
     }
+    private void UpdateFirewallHeader()
+    {
+        if (!receiverStarted) return;
+        StatusLabel.Text = firewallStatus?.State switch
+        {
+            "ready" => "●  Ready on private network",
+            "public" => "●  Check network type",
+            "missing" or "blocked" or "managed" => "●  Firewall needs attention",
+            _ => "●  Local receiver running"
+        };
+    }
     private async Task RefreshFirewallAsync(bool firstUse = false)
     {
         CheckFirewallButton.IsEnabled = AllowFirewallButton.IsEnabled = false;
@@ -248,6 +263,7 @@ public partial class MainWindow : Window
             AllowFirewallButton.Visibility = firewallStatus.CanAllow ? Visibility.Visible : Visibility.Collapsed;
             NetworkSettingsButton.Visibility = firewallStatus.State == "public" ? Visibility.Visible : Visibility.Collapsed;
             UpdateFirewallCardVisibility();
+            UpdateFirewallHeader();
         }
         catch (Exception) { FirewallLabel.Text = "Could not check Windows Firewall. Open Windows Firewall settings to review Nerqo."; }
         finally { CheckFirewallButton.IsEnabled = AllowFirewallButton.IsEnabled = true; }

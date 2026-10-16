@@ -1,6 +1,6 @@
 # Nerqo native implementation status
 
-Stable LAN/hotspot channel: **1.0.3** on `main`. Development branch: `dev/native-5ghz-20261016`.
+Stable LAN/hotspot channel: **1.0.4** on `main`. Development branch: `dev/native-5ghz-20261016`.
 This document records implementation and validation separately. A green build is
 not evidence of a successful transfer between physical Windows/Android devices.
 
@@ -102,3 +102,18 @@ The 1.0.3 Stable channel covers implemented native LAN/hotspot sharing and recov
 It does not close all nine roadmap phases. Wi-Fi Direct/Bluetooth, independent
 audit and the physical-device matrix remain explicitly open. See
 [release notes](releases/v1.0.3.md) for supported scope and limitations.
+
+## Windows permission and appearance (1.0.4)
+
+Windows checks private-network Firewall rules before starting the listener. First
+use offers a consent dialog and native UAC approval for executable-specific TCP
+44888 / UDP 44889, Private profile, LocalSubnet scope. No firewall protection,
+public-network access, explicit blocking rules or network classification is
+changed. A persistent card supports later approval/recheck and Windows settings.
+The native helper adds no terminal or browser dependency.
+
+The desktop appearance control now has an accessible theme-aware switch template,
+keyboard focus and persistent light/dark state. CI exercises the actual Toggle
+provider and color/persistence changes, captures Settings in both themes, and
+creates/verifies/removes narrow Firewall rules on a disposable Windows runner.
+The secure-desktop UAC interaction is still a physical-user acceptance item.
