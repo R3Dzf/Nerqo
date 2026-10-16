@@ -435,11 +435,11 @@ try
     if (!(await client.GetByteArrayAsync($"/api/files/{prepared.Id}")).SequenceEqual(preparationBytes))
         throw new Exception("Prepared file snapshot changed with the source");
     string receiptSession = Guid.NewGuid().ToString();
-    var receipt = new { id = prepared.Id, session = receiptSession, size = prepared.Size, sha256 = prepared.Sha256 };
+    var deliveryReceipt = new { id = prepared.Id, session = receiptSession, size = prepared.Size, sha256 = prepared.Sha256 };
     var wrongReceipt = await client.PostAsJsonAsync("/api/receipts", new { id = prepared.Id, session = receiptSession, size = prepared.Size, sha256 = new string('0', 64) });
     if (wrongReceipt.StatusCode != System.Net.HttpStatusCode.BadRequest) throw new Exception("Wrong receipt hash was accepted");
-    (await client.PostAsJsonAsync("/api/receipts", receipt)).EnsureSuccessStatusCode();
-    (await client.PostAsJsonAsync("/api/receipts", receipt)).EnsureSuccessStatusCode();
+    (await client.PostAsJsonAsync("/api/receipts", deliveryReceipt)).EnsureSuccessStatusCode();
+    (await client.PostAsJsonAsync("/api/receipts", deliveryReceipt)).EnsureSuccessStatusCode();
     if (host.History.Count(x => x.Name == prepared.Content && x.Direction == "Sent") != 1)
         throw new Exception("Repeated receipt duplicated transfer history");
     var forged = await client.PostAsJsonAsync("/api/receipts", new { id, session = Guid.NewGuid().ToString(), size = uploaded.Length, sha256 = Convert.ToHexString(SHA256.HashData(uploaded)).ToLowerInvariant() });
