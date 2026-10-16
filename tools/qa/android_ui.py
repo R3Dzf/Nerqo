@@ -22,9 +22,13 @@ def capture(name):
 
 
 def tap(label, attr='text'):
-    for _ in range(5):
-        adb('shell', 'uiautomator', 'dump', '/sdcard/nerqo-ui.xml')
-        tree = ET.fromstring(adb('shell', 'cat', '/sdcard/nerqo-ui.xml'))
+    for _ in range(12):
+        try:
+            adb('shell', 'uiautomator', 'dump', '/sdcard/nerqo-ui.xml')
+            tree = ET.fromstring(adb('shell', 'cat', '/sdcard/nerqo-ui.xml'))
+        except (subprocess.CalledProcessError, ET.ParseError):
+            time.sleep(2)
+            continue
         for node in tree.iter('node'):
             if node.get(attr) == label:
                 bounds = list(map(int, re.findall(r'\d+', node.get('bounds', ''))))
@@ -35,7 +39,9 @@ def tap(label, attr='text'):
     raise RuntimeError(f'Native UI element missing: {label}')
 
 
-adb('shell', 'am', 'start', '-n', 'com.r3dzf.nerqo/.MainActivity')
+adb('shell', 'input', 'keyevent', 'KEYCODE_WAKEUP')
+adb('shell', 'wm', 'dismiss-keyguard')
+adb('shell', 'am', 'start', '-W', '-n', 'com.r3dzf.nerqo/.MainActivity')
 time.sleep(5)
 capture('Devices')
 tap('Transfers')
