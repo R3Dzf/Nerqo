@@ -184,6 +184,9 @@ public sealed class LanHost : IAsyncDisposable
     {
         string safe = ValidFolderPath(relative);
         string basePath = Path.Combine(ReceivedDirectory, folder.DirectoryName);
+        if (!Directory.Exists(basePath)
+            || (File.GetAttributes(basePath) & FileAttributes.ReparsePoint) != 0)
+            throw new BadHttpRequestException("Folder destination is unavailable or redirected", 400);
         string current = basePath;
         string[] segments = safe.Split('/');
         int parentCount = directory ? segments.Length : segments.Length - 1;
