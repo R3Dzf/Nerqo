@@ -8,8 +8,10 @@ for Windows-to-Android folders.
 The native clients use WPF and Compose. The legacy browser implementation is
 retained only for regression tests and is not shipped in the native installer.
 
-Not yet an official Stable release. Native CI validation, permanent Android
-release signing, physical-device transfer and in-place upgrade checks must be
-reported separately. A Debug APK cannot update the permanent-key installation.
+Not yet an official Stable release. Windows/Android compilation, the encrypted host smoke, Android integrity tests,
+Windows installer upgrade smoke and Android 35 UI navigation have passed. The
+Android APK is privately signed with the original permanent identity and its
+payload matches the CI unsigned build. Physical-device transfer and upgrade
+checks remain outstanding. A Debug APK cannot update the permanent-key installation.
 Wi-Fi Direct and Bluetooth are not implemented. Windows Authenticode signing
 is not present. See docs/NATIVE_ROADMAP.md for all nine phases.

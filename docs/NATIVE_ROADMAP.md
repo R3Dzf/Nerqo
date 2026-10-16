@@ -16,7 +16,7 @@ not evidence of a successful transfer between physical Windows/Android devices.
 | 06 Text/links | Two-way text and links; copy; Android share target; explicit Paste button | Optional clipboard sync remains unimplemented; clipboard is read only on explicit Paste |
 | 07 Security | Persistent Windows TLS identity; QR/manual identity verification; Android pinning; revocable peer tokens; path/reparse checks | Independent audit and broader adversarial/lifecycle testing |
 | 08 Connection alternatives | Same LAN; normal phone hotspot; system-managed Android local-only hotspot with generated secure credentials | Native Wi-Fi Direct and Bluetooth transports are not implemented |
-| 09 Delivery/updates | WPF installer; permanent Android certificate pin; stable-only native updater; full/delta reconstruction; coordinated native versioning; source/payload/signing checks | New private Android signature; physical in-place upgrade; Windows Authenticode publisher signature; final acceptance before Stable |
+| 09 Delivery/updates | WPF installer; permanent Android certificate pin; stable-only native updater; full/delta reconstruction; coordinated native versioning; source/payload/signing checks; per-user installer 1.0.0 → 1.0.1 tested on a Windows CI runner | Physical in-place upgrade; Windows Authenticode publisher signature; final acceptance before Stable |
 
 ## UI and identity (1.0.1)
 
@@ -55,10 +55,12 @@ hardware.
 
 - Native CI builds WPF, runs the authenticated LAN/integrity/Delta smoke suite,
   captures real WPF screens, and builds Android Debug and unsigned Release APKs.
+- Android 35 emulator UI smoke navigates the actual Compose screens and captures light/dark output, including system-bar contrast.
 - Android JVM tests exercise the saved-member integrity decision with exact,
   empty, truncated, oversized and same-size altered content.
 - The Stable workflow only publishes from `main`, with both platforms successful
   and a permanent-key-signed APK matching the independently compiled payload.
+- Installer upgrade smoke installs the previous native 1.0.0 build, upgrades to 1.0.1, and checks the persistent TLS identity, authorized device token, shared note and received file. This runs on a disposable Windows CI runner, not the user’s PC.
 - A debug APK is for development testing. It cannot update the permanent-key
   installation; do not uninstall the stable installation to try it.
 - The signing private key remains outside the public repository. Builds here do

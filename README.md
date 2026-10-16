@@ -4,7 +4,7 @@
 
 Nerqo is a native Windows and Android application for transferring files, folders, links and text over a local network. A router does not need internet access; the devices can also use an Android hotspot.
 
-> **Development branch:** `dev/native-5ghz-20261016`. Native 1.0.1 adds matching Windows/Android screens, a new app identity and verified folder receive retry. Native CI artifacts are development builds; no official Stable release is claimed. Physical-device acceptance and permanent Android release signing remain required. The `main` branch and older v0.3.0 release are unchanged.
+> **Development branch:** `dev/native-5ghz-20261016`. Native 1.0.1 adds matching Windows/Android screens, a new app identity and verified folder receive retry. Native CI artifacts are development builds; no official Stable release is claimed. The Android 1.0.1 build has been privately signed with the original pinned identity and its payload verified. Physical-device acceptance remains required. The `main` branch and older v0.3.0 release are unchanged.
 
 ## Native applications
 
@@ -55,6 +55,8 @@ Android release signing uses a permanent, pinned public certificate fingerprint.
 - [Native implementation roadmap](docs/NATIVE_ROADMAP.md)
 - [Offline Android release signing](docs/OFFLINE_RELEASE_SIGNING.md)
 
-The native CI compiles WPF and Android, runs encrypted transport and integrity smoke tests, and produces build artifacts (some CI artifact names retain the historical Preview suffix). The native Stable workflow is gated on `main`: it accepts only a native Windows installer and an Android APK signed with the permanent key, whose payload must match the independently built unsigned package. It does **not** publish the old Python/browser app.
+The native CI compiles WPF and Android, runs encrypted transport and integrity smoke tests, checks a per-user Windows installer upgrade from 1.0.0 to 1.0.1 with preserved pairing/data, and produces build artifacts (some CI artifact names retain the historical Preview suffix). The native Stable workflow is gated on `main`: it accepts only a native Windows installer and an Android APK signed with the permanent key, whose payload must match the independently built unsigned package. It does **not** publish the old Python/browser app.
 
-**Release-validation limits:** Wi-Fi Direct/Bluetooth fallbacks (where supported), real Wi-Fi/hotspot/5 GHz transfer benchmarking, testing on physical Windows/Android devices, and verified in-place upgrade tests have not been completed. Passing CI validates the build and emulated transport, not every router or phone. The Windows installer has no Authenticode publisher certificate.
+The separate Android UI smoke runs the real Compose app on an Android 35 emulator, navigates Transfers/Devices/Settings and captures light/dark screens. WPF screens are captured from the running Windows app.
+
+**Release-validation limits:** Wi-Fi Direct/Bluetooth fallbacks (where supported), real Wi-Fi/hotspot/5 GHz transfer benchmarking, testing on physical Windows/Android devices, and upgrades on the user’s physical devices have not been completed. Passing CI validates the build and emulated transport, not every router or phone. The Windows installer has no Authenticode publisher certificate.

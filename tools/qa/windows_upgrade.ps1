@@ -9,11 +9,17 @@ $appPath = Join-Path $installPath 'Nerqo.exe'
 $appProcess = $null
 function Install-Nerqo([string]$installer) {
     $resolved = (Resolve-Path -LiteralPath $installer).Path
-    $args = "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /NORESTARTAPPLICATIONS /DIR=`"$installPath`""
-    $setup = Start-Process -FilePath $resolved -ArgumentList $args -PassThru -Wait
+    $installerArguments = "/SP- /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /NORESTARTAPPLICATIONS /DIR=`"$installPath`""
+    Write-Host "Installing: $resolved"
+    $setup = Start-Process -FilePath $resolved -ArgumentList $installerArguments -PassThru
+    if (-not $setup.WaitForExit(120000)) {
+        $setup.Kill()
+        throw 'Native setup did not finish within two minutes'
+    }
     if ($setup.ExitCode -ne 0) { throw "Installer failed: $($setup.ExitCode)" }
 }
 function Start-Nerqo {
+    Write-Host "Starting installed app: $appPath"
     $script:appProcess = Start-Process -FilePath $appPath -PassThru
     for ($attempt = 0; $attempt -lt 30; $attempt++) {
         if ($script:appProcess.HasExited) { throw 'Installed native app exited unexpectedly' }

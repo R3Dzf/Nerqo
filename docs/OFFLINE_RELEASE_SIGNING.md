@@ -1,19 +1,43 @@
-# Permanent offline signing without GitHub repository secrets
+# Permanent private Android signing
 
-Nerqo can use GitHub Actions to build the Android APK **unsigned**, download it into a private build environment, and sign it with the pinned permanent release identity (`android/RELEASE_SIGNING_CERT.sha256`). GitHub never receives the private `.p12` keystore or its password.
+Native APKs are built unsigned in GitHub Actions and signed privately with the
+original Android identity pinned in `android/RELEASE_SIGNING_CERT.sha256`.
+Private PKCS12 keys and recovery passwords are never committed or attached to
+public CI artifacts. Keep the original private identity and recovery record.
 
-## Current Android v0.3.0
+## Reproducible signing procedure
 
-The APK at [`downloads/Nerqo-Android-v0.3.0.apk`](../downloads/Nerqo-Android-v0.3.0.apk) was privately signed using the owner's original long-lived PKCS12 key. Its public signature can be independently checked with `apksigner verify --verbose --print-certs`, and its integrity is recorded in the adjacent `.sha256` file.
+1. Bump the native WPF, Inno Setup and Android versions together; increase the
+   Android `versionCode`. Do not reuse a published version for different code.
+2. Build the native CI on `dev/native-5ghz-20261016`. Download its unsigned Release
+   APK and `Nerqo-Android-Signing-Tool` (the SDK's public `apksigner.jar`).
+3. In a private environment run `tools/sign_release_offline.py` with `--unsigned`,
+   `--apksigner-jar`, `--keystore`, `--recovery` and a new `--output` path. The tool
+   reads passwords locally, checks the pinned certificate before signing, signs
+   with v1/v2/v3 schemes, then verifies the resulting certificate and v2 scheme.
+4. Run `python tools/verify_published_apk.py UNSIGNED SIGNED` to compare the signed
+   APK's ZIP payload against the independent unsigned build. Record its SHA-256.
+5. For an official release, put only the signed public APK at
+   `downloads/Nerqo-Android-vVERSION.apk` with its `.sha256` file. After acceptance,
+   the native `.github/workflows/release.yml` builds Windows, independently
+   rebuilds Android, checks the permanent certificate and payload equality,
+   and publishes coordinated native assets/optional deltas **from main only**.
 
-## Further releases
+The private key was recovered and matched to the pinned identity for 1.0.1.
+A development build signed with that key is still not evidence that all native
+hardware acceptance criteria have passed. Do not label it Stable solely because
+signing and CI succeeded.
 
-1. Update the code and increase both `nerqo/version.py` and Android `versionCode`/`versionName`.
-2. Build an **unsigned** Release APK via GitHub Actions. Download the unsigned APK and the Android SDK `apksigner.jar` tool into a **private** environment.
-3. Use `python tools/sign_release_offline.py --unsigned ... --apksigner-jar ... --keystore ... --recovery ... --output ...` locally. It verifies the pinned certificate, signs using v2/v3 schemes, verifies the result, and prints the artifact SHA-256.
-4. Check the signed ZIP payload matches the CI unsigned ZIP using `python tools/verify_published_apk.py UNSIGNED SIGNED`.
-5. Commit only the **signed public APK** at `downloads/Nerqo-Android-vVERSION.apk` and its adjacent `.sha256` file; never commit the private key or recovery file. GitHub workflow `publish-locally-signed.yml` recompiles the same source, verifies payload equality and certificate fingerprint, builds the Windows EXE, and publishes a GitHub Release with update metadata.
+Android updates require the same signing identity and a higher version code.
+A debug-signed APK cannot update a permanent-key installation. Do not uninstall
+the permanent-key installation to test a debug APK. Android signing is separate
+from Windows Authenticode publisher signing, which is not currently present.
 
-This arrangement enables a signed, verifiable release **without ever exposing the secret to GitHub Actions**. Unlike encrypted GitHub Secrets-based signing, **future releases still require an authorized offline signing step**; complete unattended future signing is not possible without entrusting a signing key to a secure, automated signer. This is intentional protection for the permanent private key.
+## Unattended releases
 
-The first debug-signed Android installation may require a one-time uninstall/reinstall before installing a stable-release-signed APK. Back up user data first. No publisher-trusted Windows Authenticode signing is provided by the Android key.
+Private signing during this authorized development session uses the recovered
+original identity. Future unattended signing requires a secure automated signer
+or deliberately configured GitHub Actions secrets. The GitHub connector in this
+environment cannot write repository secrets. Never move passwords or private
+keys into source files as a workaround. Current native CI deliberately produces
+an unsigned Release APK, and normal debug artifacts are not upgrade packages.

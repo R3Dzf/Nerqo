@@ -17,6 +17,7 @@ permissions:
 jobs:
   windows-native:
     runs-on: windows-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
