@@ -11,6 +11,7 @@ internal object TransferIntegrity {
         var size = 0L
         val buffer = ByteArray(256 * 1024)
         while (true) {
+            TransferControl.check()
             val count = input.read(buffer)
             if (count < 0) break
             if (count == 0) continue

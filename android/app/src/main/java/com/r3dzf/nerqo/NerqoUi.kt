@@ -63,6 +63,7 @@ private fun bytes(size: Long): String = when {
 @Composable internal fun NerqoScreen(
     deviceName: String?, connected: Boolean, paired: Boolean, nearby: List<Device>, entries: List<SharedEntry>,
     busy: Boolean, progress: Float, message: String, network: String, hotspotText: String,
+    transfer: TransferUi?, onPause: () -> Unit, onResume: () -> Unit, onCancel: () -> Unit,
     shareText: String, manualIp: String, darkMode: Boolean,
     onShareText: (String) -> Unit, onManualIp: (String) -> Unit, onTheme: (Boolean) -> Unit,
     onScanQr: () -> Unit, onDiscover: () -> Unit, onSelectDevice: (Device) -> Unit,
@@ -107,11 +108,25 @@ private fun bytes(size: Long): String = when {
                 Surface(color = MaterialTheme.colorScheme.surfaceVariant, shape = RoundedCornerShape(14.dp)) {
                     Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         Text(message, fontSize = 13.sp, lineHeight = 19.sp)
-                        if (busy) {
+                        if (busy && transfer == null) {
                             if (progress > 0f) LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth())
                             else LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                         }
                     }
+                }
+            }
+            if (transfer != null) item {
+                Panel {
+                    Text(transfer.title, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+                    Caption(transfer.detail)
+                    if (transfer.fraction > 0f) LinearProgressIndicator(progress = { transfer.fraction }, modifier = Modifier.fillMaxWidth())
+                    else if (!transfer.paused && busy) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        if (transfer.paused) Button(onClick = onResume, enabled = !busy, modifier = Modifier.weight(1f)) { Text("Resume") }
+                        else Button(onClick = onPause, enabled = busy, modifier = Modifier.weight(1f)) { Text("Pause") }
+                        OutlinedButton(onClick = onCancel, modifier = Modifier.weight(1f)) { Text("Cancel") }
+                    }
+                    Caption("Completed files are kept. Downloads resume where the storage provider supports seeking.")
                 }
             }
             when (page) {
@@ -128,8 +143,8 @@ private fun bytes(size: Long): String = when {
                     item { Panel {
                         Title("Send something")
                         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                            Button(onClick = onFiles, enabled = !busy && paired, modifier = Modifier.weight(1f).heightIn(min = 56.dp)) { Symbol(R.drawable.ic_file); Spacer(Modifier.width(8.dp)); Text("Files") }
-                            OutlinedButton(onClick = onFolder, enabled = !busy && paired, modifier = Modifier.weight(1f).heightIn(min = 56.dp)) { Symbol(R.drawable.ic_folder); Spacer(Modifier.width(8.dp)); Text("Folder") }
+                            Button(onClick = onFiles, enabled = !busy && paired && transfer == null, modifier = Modifier.weight(1f).heightIn(min = 56.dp)) { Symbol(R.drawable.ic_file); Spacer(Modifier.width(8.dp)); Text("Files") }
+                            OutlinedButton(onClick = onFolder, enabled = !busy && paired && transfer == null, modifier = Modifier.weight(1f).heightIn(min = 56.dp)) { Symbol(R.drawable.ic_folder); Spacer(Modifier.width(8.dp)); Text("Folder") }
                         }
                         Caption("Folders travel directly, including subfolders and empty folders.")
                     } }
@@ -158,7 +173,7 @@ private fun bytes(size: Long): String = when {
                                     Caption(entry.sender + " · " + if (entry.kind in listOf("file", "folder")) bytes(entry.size) else "Text / link")
                                 }
                             }
-                            OutlinedButton(onClick = { onEntry(entry) }, enabled = !busy && paired, modifier = Modifier.fillMaxWidth()) {
+                            OutlinedButton(onClick = { onEntry(entry) }, enabled = !busy && paired && transfer == null, modifier = Modifier.fillMaxWidth()) {
                                 Text(when(entry.kind) { "file" -> "Save file"; "folder" -> "Save / retry folder"; else -> "Copy text" })
                             }
                         }
@@ -213,7 +228,7 @@ private fun bytes(size: Long): String = when {
                         Title("Keep Nerqo up to date")
                         Caption("Updates use the internet. Your local transfers work offline.")
                         Button(onClick = onUpdates, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("Check for app updates") }
-                        Caption("Nerqo 1.0.1 · Windows + Android")
+                        Caption("Nerqo 1.0.2 · Windows + Android")
                     } }
                 }
             }

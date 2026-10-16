@@ -43,8 +43,27 @@ adb('shell', 'input', 'keyevent', 'KEYCODE_WAKEUP')
 adb('shell', 'wm', 'dismiss-keyguard')
 adb('shell', 'am', 'start', '-W', '-n', 'com.r3dzf.nerqo/.MainActivity')
 time.sleep(5)
+tap('Devices')
 capture('Devices')
 tap('Transfers')
+capture('Transfer-restored')
+tap('Resume')
+time.sleep(1)
+tap('Pause')
+time.sleep(1)
+capture('Transfer-paused')
+tap('Resume')
+for _ in range(25):
+    time.sleep(2)
+    try:
+        adb('shell', 'uiautomator', 'dump', '/sdcard/nerqo-ui.xml')
+        tree = ET.fromstring(adb('shell', 'cat', '/sdcard/nerqo-ui.xml'))
+        if not any(n.get('text') in ('Resume', 'Pause') for n in tree.iter('node')):
+            break
+    except (subprocess.CalledProcessError, ET.ParseError):
+        continue
+else:
+    raise RuntimeError('Native UI transfer did not complete after resume')
 capture('Transfers')
 tap('Settings')
 capture('Settings')
@@ -53,4 +72,4 @@ tap('Transfers')
 capture('Transfers-dark')
 if 'FATAL EXCEPTION' in adb('logcat', '-d', '-s', 'AndroidRuntime:E'):
     raise RuntimeError('Android runtime crash during native UI smoke')
-print('Captured native Compose light/dark screens and exercised navigation.')
+print('Captured Compose light/dark screens; restored, paused and resumed an actual TLS/SAF download through native UI.')

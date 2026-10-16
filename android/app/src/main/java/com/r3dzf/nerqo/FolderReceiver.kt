@@ -36,7 +36,7 @@ internal object FolderReceiver {
     }
 
     fun receive(context: Context, device: Device, token: String, id: String,
-                destinationTree: Uri, displayName: String,
+                destinationTree: Uri, displayName: String, sessionId: String,
                 progress: (Int, String, Long, Long) -> Unit) {
         val selected = DocumentFile.fromTreeUri(context, destinationTree)
             ?: throw IOException("Cannot open destination")
@@ -58,6 +58,7 @@ internal object FolderReceiver {
         var total = 0L
         val seen = mutableSetOf<String>()
         for (i in 0 until entries.length()) {
+            TransferControl.check()
             val member = entries.getJSONObject(i)
             components(member.getString("path"))
             if (!seen.add(member.getString("path"))) throw IOException("Duplicate folder member")
@@ -74,6 +75,7 @@ internal object FolderReceiver {
             .joinToString("") { "%02x".format(it.toInt() and 0xff) }
         var completed = 0L
         for (i in 0 until entries.length()) {
+            TransferControl.check()
             val file = entries.getJSONObject(i)
             val relative = file.getString("path")
             val parts = components(relative)
@@ -95,24 +97,31 @@ internal object FolderReceiver {
                 progress(i + 1, "Verified " + relative, completed, total)
                 continue
             }
-            val staging = parent.createFile("application/octet-stream",
-                destinationName + ".nerqo-part")
+            val partialKey = "partial_" + receiptKey
+            val savedPartial = prefs.getString(partialKey, null)?.let { JSONObject(it) }
+            val previous = savedPartial?.takeIf { it.optString("sha256") == hash && it.optLong("size", -1) == expectedSize }
+                ?.let { parent.findFile(it.getString("name"))?.takeIf { document -> document.uri.toString() == it.getString("uri") } }
+            val staging = previous ?: parent.createFile("application/octet-stream", destinationName + ".nerqo-part")
                 ?: throw IOException("Cannot create " + relative)
+            if (!prefs.edit().putString(partialKey, JSONObject().put("uri", staging.uri.toString()).put("name", staging.name)
+                    .put("sha256", hash).put("size", expectedSize).toString()).commit())
+                throw IOException("Cannot save partial folder member identity")
             var finalized = false
             try {
                 NativeClient.saveOutgoingFolderFile(context, device, token, id, relative, expectedSize,
-                    hash, staging.uri) { done, size ->
+                    hash, staging.uri, sessionId) { done, _ ->
                     progress(i + 1, relative, completed + done, total)
                 }
                 if (!staging.renameTo(destinationName))
                     throw IOException("Storage provider could not finalize " + relative)
                 finalized = true
-                if (!prefs.edit().putString(receiptKey, hash + "|" + staging.uri).commit())
+                if (!prefs.edit().putString(receiptKey, hash + "|" + staging.uri).remove(partialKey).commit())
                     throw IOException("Could not save the folder retry receipt")
                 completed += expectedSize
                 progress(i + 1, relative, completed, total)
             } catch (error: Exception) {
-                if (!finalized) staging.delete()
+                // Keep our checkpointed partial for pause, process death or a network retry.
+                // Unverified documents are removed only after an explicit Cancel.
                 throw error
             }
         }

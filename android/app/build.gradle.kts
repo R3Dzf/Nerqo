@@ -10,8 +10,9 @@ android {
         applicationId = "com.r3dzf.nerqo"
         minSdk = 26
         targetSdk = 35
-        versionCode = 10001
-        versionName = "1.0.1"
+        versionCode = 10002
+        versionName = "1.0.2"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     buildFeatures { compose = true }
     val signingFile = System.getenv("NERQO_SIGNING_FILE")
@@ -46,6 +47,8 @@ android {
 }
 dependencies {
     testImplementation("junit:junit:4.13.2")
+    androidTestImplementation("androidx.test:runner:1.6.2")
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
     val composeBom = platform("androidx.compose:compose-bom:2025.09.01")
     implementation(composeBom)
     implementation("androidx.compose.ui:ui")

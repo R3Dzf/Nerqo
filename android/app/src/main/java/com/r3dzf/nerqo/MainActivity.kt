@@ -62,6 +62,9 @@ class MainActivity : ComponentActivity() {
     private var message by mutableStateOf("Find your Windows device to start")
     private var busy by mutableStateOf(false)
     private var progress by mutableFloatStateOf(0f)
+    private var pendingTransfer by mutableStateOf<TransferJob?>(null)
+    private var transferUi by mutableStateOf<TransferUi?>(null)
+    private var transferControl: TransferControl? = null
     private var shareText by mutableStateOf("")
     private var manualIp by mutableStateOf("")
     private var pinText by mutableStateOf("")
@@ -76,6 +79,8 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         darkMode = prefs.getBoolean("dark_mode", false)
+        pendingTransfer = TransferJob.load(this)
+        pendingTransfer?.let { transferUi = TransferUi(it.title, paused = true, detail = "Interrupted transfer · Ready to resume") }
         val host = prefs.getString("host", "") ?: ""
         val storedPort = prefs.getInt("port", 44888)
         if (isPrivateIPv4(host)) {
@@ -138,6 +143,7 @@ class MainActivity : ComponentActivity() {
         }
     }
     private fun select(found: Device) {
+        if (pendingTransfer != null) { message = "Resume or cancel the transfer before changing computers"; return }
         device = found
         connected = false
         token = null
@@ -205,59 +211,135 @@ class MainActivity : ComponentActivity() {
             runOnUiThread { shareText = ""; entries = fresh; message = "Text sent to Windows" }
         }
     }
+    private fun keepPermission(uri: Uri, write: Boolean = false) {
+        val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or (if (write) Intent.FLAG_GRANT_WRITE_URI_PERMISSION else 0)
+        runCatching { contentResolver.takePersistableUriPermission(uri, flags) }
+    }
+    private fun createTransfer(kind: String, title: String, uris: List<Uri> = emptyList(),
+                               target: Uri? = null, entry: SharedEntry? = null) {
+        if (pendingTransfer != null || busy) { message = "Resume or cancel the current transfer first"; return }
+        val d = device ?: run { message = "Pair with Windows first"; return }
+        if (token == null) { message = "Pair with Windows first"; return }
+        val fingerprint = prefs.getString("cert_${d.address}:${d.port}", null) ?: return
+        uris.forEach { keepPermission(it) }
+        target?.let { keepPermission(it, write = true) }
+        val job = TransferJob(kind = kind, title = title, host = d.address, port = d.port,
+            deviceName = d.name, fingerprint = fingerprint, uris = uris.map { it.toString() },
+            target = target?.toString() ?: "", entry = entry)
+        try { job.save(this); pendingTransfer = job; resumeTransfer() }
+        catch (error: Exception) { message = error.message ?: "Could not save transfer" }
+    }
     private fun submitFiles(uris: List<Uri>) {
-        val d = device
-        val access = token
-        if (d == null || access == null) { message = "Pair with Windows first, then choose files"; return }
-        task {
-            for (uri in uris) NativeClient.sendFile(this, d, access, uri) { done, total ->
-                runOnUiThread { progress = if (total <= 0) 1f else (done.toFloat() / total).coerceIn(0f, 1f); message = "Uploading ${"%.0f".format(progress * 100)}%" }
-            }
-            val fresh = NativeClient.list(d, access)
-            runOnUiThread { entries = fresh; message = "Files sent successfully"; progress = 0f }
+        if (uris.isNotEmpty()) createTransfer("uploadFiles", "Send ${uris.size} file(s) to Windows", uris)
+    }
+    private fun submitFolder(treeUri: Uri) = createTransfer("uploadFolder", "Send folder to Windows", listOf(treeUri))
+    private fun download(entry: SharedEntry, target: Uri) = createTransfer("downloadFile", "Save " + entry.content, target = target, entry = entry)
+    private fun receiveFolder(entry: SharedEntry, target: Uri) = createTransfer("downloadFolder", "Save folder: " + entry.content, target = target, entry = entry)
+
+    private fun pauseTransfer() {
+        transferControl?.interrupt(TransferStop.PAUSE)
+        transferUi = transferUi?.copy(detail = "Pausing at the last safe checkpoint…")
+    }
+    private fun cancelTransfer() {
+        val job = pendingTransfer ?: return
+        if (busy && transferControl == null) { message = "Connection check in progress. Try Cancel again shortly."; return }
+        if (busy) {
+            transferControl?.interrupt(TransferStop.CANCEL)
+            transferUi = transferUi?.copy(detail = "Cancelling… Completed files will be kept.")
+        } else {
+            // Run cleanup on the same serial executor, with no second document writer.
+            resumeTransfer(cancelOnly = true)
         }
     }
-    private fun submitFolder(treeUri: Uri) {
-        val d = device
-        val access = token
-        if (d == null || access == null) { message = "Pair with Windows first, then choose a folder"; return }
-        task {
-            runOnUiThread { message = "Sending folder directly without ZIP…" }
-            FolderTransfer.send(this, d, access, treeUri) { count, current, done, total ->
-                runOnUiThread {
-                    progress = if (total <= 0L) 0f else (done.toFloat() / total).coerceIn(0f, 1f)
-                    message = "Folder: " + count + " entries · " + current
+    private fun resumeTransfer(cancelOnly: Boolean = false) {
+        val job = pendingTransfer ?: return
+        if (busy || isDestroyed) return
+        if (!TransferControl.workerActive.compareAndSet(false, true)) {
+            message = "The previous transfer is still closing. Try Resume again shortly."; return
+        }
+        val control = TransferControl()
+        transferControl = control
+        busy = true
+        transferUi = TransferUi(job.title, detail = if (cancelOnly) "Cancelling…" else "Checking saved transfer…")
+        executor.execute {
+            val destination = Device(job.deviceName, job.host, job.port)
+            val access = prefs.getString("token_${job.host}", null)
+            try {
+                bindLocalNetwork()
+                if (cancelOnly) throw TransferCancelled()
+                require(isPrivateIPv4(job.host) && job.port in 1..65535 && job.nextFile in 0..job.uris.size)
+                require(prefs.getString("cert_${job.host}:${job.port}", null) == job.fingerprint) {
+                    "The computer's security identity changed. Cancel this transfer and pair again."
                 }
-            }
-            val fresh = NativeClient.list(d, access)
-            runOnUiThread {
-                entries = fresh
-                progress = 0f
-                message = "Folder transferred with nested files and empty folders"
-            }
-        }
-    }
-    private fun download(entry: SharedEntry, target: Uri) {
-        val d = device ?: return
-        val access = token ?: return
-        task {
-            NativeClient.download(this, d, access, entry, target) { done, total ->
-                runOnUiThread { progress = if (total <= 0) 1f else (done.toFloat() / total).coerceIn(0f, 1f); message = "Downloading ${"%.0f".format(progress * 100)}%" }
-            }
-            runOnUiThread { progress = 0f; message = "Saved ${entry.content}" }
-        }
-    }
-    private fun receiveFolder(item: SharedEntry, destination: Uri) {
-        val d = device ?: return
-        val access = token ?: return
-        task {
-            FolderReceiver.receive(this, d, access, item.id, destination, item.content) { n, path, done, total ->
-                runOnUiThread {
-                    progress = if (total <= 0L) 0f else (done.toFloat() / total).coerceIn(0f, 1f)
-                    message = "Saving folder: " + n + " files · " + path
+                if (access == null) throw PairingExpiredException()
+                NativeClient.trustIdentity(destination, job.fingerprint)
+                var lastUiUpdate = 0L
+                var sampleTime = System.nanoTime()
+                var sampleBytes = 0L
+                var bytesPerSecond = 0.0
+                fun update(done: Long, total: Long, label: String = "") {
+                    val now = System.nanoTime()
+                    if (done < sampleBytes) { sampleTime = now; sampleBytes = done; bytesPerSecond = 0.0 }
+                    if (now - sampleTime >= 500_000_000L) {
+                        bytesPerSecond = (done - sampleBytes).coerceAtLeast(0) * 1_000_000_000.0 / (now - sampleTime)
+                        sampleTime = now; sampleBytes = done
+                    }
+                    if (now - lastUiUpdate < 100_000_000L && done != total) return
+                    lastUiUpdate = now
+                    val fraction = if (total <= 0) 0f else (done.toFloat() / total).coerceIn(0f, 1f)
+                    fun bytes(value: Long) = when {
+                        value < 1048576 -> "%.1f KB".format(java.util.Locale.ROOT, value / 1024.0)
+                        value < 1073741824 -> "%.1f MB".format(java.util.Locale.ROOT, value / 1048576.0)
+                        else -> "%.2f GB".format(java.util.Locale.ROOT, value / 1073741824.0)
+                    }
+                    val rate = if (bytesPerSecond > 0) " · " + bytes(bytesPerSecond.toLong()) + "/s" else ""
+                    val eta = if (bytesPerSecond > 0 && total > done) " · ~" + ((total - done) / bytesPerSecond).toLong() + "s left" else ""
+                    val detail = (if (label.isEmpty()) "" else label + "\n") + bytes(done) + (if (total > 0) " / " + bytes(total) else "") + rate + eta
+                    runOnUiThread { if (!isDestroyed && pendingTransfer?.id == job.id) {
+                        progress = fraction; transferUi = TransferUi(job.title, detail = detail, fraction = fraction)
+                    } }
                 }
+                control.run {
+                    if (job.kind.startsWith("upload") && NativeClient.status(destination).optInt("transferProtocol", 1) < 2)
+                        throw IOException("Update Nerqo on Windows to use safe pause and resume.")
+                    when (job.kind) {
+                        "uploadFiles" -> {
+                            for (index in job.nextFile until job.uris.size) {
+                                control.checkpoint()
+                                NativeClient.sendFile(this, destination, access, Uri.parse(job.uris[index]), sessionId = job.id) { done, total ->
+                                    update(done, total, "File ${index + 1} of ${job.uris.size}")
+                                }
+                                job.nextFile = index + 1; job.save(this)
+                            }
+                        }
+                        "uploadFolder" -> FolderTransfer.send(this, destination, access, Uri.parse(job.uris.single()), job.id) { count, path, done, total ->
+                            update(done, total, "$count entries · $path")
+                        }
+                        "downloadFile" -> NativeClient.download(this, destination, access, job.entry!!, Uri.parse(job.target), job.id) { done, total -> update(done, total) }
+                        "downloadFolder" -> FolderReceiver.receive(this, destination, access, job.entry!!.id, Uri.parse(job.target), job.entry.content, job.id) { count, path, done, total ->
+                            update(done, total, "$count entries · $path")
+                        }
+                        else -> throw IOException("Unknown transfer type")
+                    }
+                }
+                TransferJob.clear(this)
+                NativeClient.cleanSession(this, destination, access, job.id, cancel = false)
+                runOnUiThread { if (!isDestroyed) { pendingTransfer = null; transferUi = null; message = "Transfer completed and SHA-256 verified" } }
+            } catch (error: Exception) {
+                if (cancelOnly || control.stop == TransferStop.CANCEL || error is TransferCancelled) {
+                    NativeClient.cleanSession(this, destination, access, job.id, cancel = true)
+                    TransferJob.clear(this)
+                    runOnUiThread { if (!isDestroyed) { pendingTransfer = null; transferUi = null; message = "Transfer cancelled. Completed files were kept." } }
+                } else {
+                    runOnUiThread { if (!isDestroyed) {
+                        transferUi = TransferUi(job.title, paused = true, detail = if (control.stop == TransferStop.PAUSE || error is TransferPaused) "Paused · Resume from the saved checkpoint" else "Interrupted · " + (error.message ?: "Try again"))
+                        message = "Transfer saved. You can resume it or cancel."
+                    } }
+                }
+            } finally {
+                TransferControl.workerActive.set(false)
+                runOnUiThread { if (!isDestroyed) { busy = false; transferControl = null; progress = 0f } }
             }
-            runOnUiThread { progress = 0f; message = "Folder saved successfully" }
         }
     }
     private fun isPrivateIPv4(raw: String): Boolean {
@@ -271,6 +353,7 @@ class MainActivity : ComponentActivity() {
         } catch (_: Exception) { false }
     }
     private fun scanPairQr() {
+        if (pendingTransfer != null) { message = "Resume or cancel the transfer before pairing another computer"; return }
         val options = ScanOptions().setDesiredBarcodeFormats(ScanOptions.QR_CODE)
             .setPrompt("Scan the QR inside Nerqo on your Windows computer")
             .setBeepEnabled(false).setOrientationLocked(false)
@@ -370,6 +453,7 @@ class MainActivity : ComponentActivity() {
         }
     }
     override fun onDestroy() {
+        transferControl?.interrupt(TransferStop.PAUSE)
         hotspotReservation?.close()
         (getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager).bindProcessToNetwork(null)
         executor.shutdownNow()
@@ -402,6 +486,8 @@ class MainActivity : ComponentActivity() {
                 deviceName = device?.name, connected = connected, paired = token != null,
                 nearby = nearby, entries = entries, busy = busy, progress = progress,
                 message = message, network = wifiText(), hotspotText = hotspotText,
+                transfer = transferUi, onPause = ::pauseTransfer,
+                onResume = { resumeTransfer() }, onCancel = ::cancelTransfer,
                 shareText = shareText, manualIp = manualIp, darkMode = darkMode,
                 onShareText = { shareText = it }, onManualIp = { manualIp = it },
                 onTheme = { darkMode = it; prefs.edit().putBoolean("dark_mode", it).apply() },

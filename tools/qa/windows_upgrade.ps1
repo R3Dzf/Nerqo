@@ -39,7 +39,7 @@ function Stop-Nerqo {
 try {
     Install-Nerqo $OldInstaller
     $old = Start-Nerqo
-    if ($old.version -ne '1.0.0') { throw 'Wrong old application installed' }
+    if ($old.version -ne '1.0.1') { throw 'Wrong old application installed' }
     Stop-Nerqo
     # Isolated GitHub Windows runner: synthetic state, no real user's data.
     $token = 'upgrade-smoke-only-token'
@@ -63,13 +63,13 @@ try {
     Stop-Nerqo
     Install-Nerqo $NewInstaller
     $current = Start-Nerqo
-    if ($current.version -ne '1.0.1') { throw 'Installed app did not upgrade to 1.0.1' }
+    if ($current.version -ne '1.0.2') { throw 'Installed app did not upgrade to 1.0.2' }
     $after = Invoke-RestMethod 'https://127.0.0.1:44888/api/items' -Headers $headers -SkipCertificateCheck
     if ($after.items[0].id -ne $id) { throw 'Shared note or paired token lost during upgrade' }
     foreach ($fixture in @($identity, $saved, $received)) {
         if ((Get-FileHash -LiteralPath $fixture.Path).Hash -ne $fixture.Hash) { throw "Upgrade changed preserved data: $($fixture.Path)" }
     }
     New-Item -ItemType Directory -Force dist/qa | Out-Null
-    'PASS: per-user installer 1.0.0 -> 1.0.1; installed native receiver; persistent TLS identity; paired token; shared note; received file preserved.' | Set-Content dist/qa/windows-upgrade.txt
+    'PASS: per-user installer 1.0.1 -> 1.0.2; installed native receiver; persistent TLS identity; paired token; shared note; received file preserved.' | Set-Content dist/qa/windows-upgrade.txt
     Get-Content dist/qa/windows-upgrade.txt
 } finally { Stop-Nerqo }

@@ -111,6 +111,42 @@ if ((await client.PostAsJsonAsync($"/api/transfers/{id}/finish", new {})).Status
 var received = Path.Combine(host.ReceivedDirectory, "native.txt");
 if (!File.Exists(received) || !uploaded.SequenceEqual(await File.ReadAllBytesAsync(received)))
     throw new Exception("Android upload was not saved to the Windows Received folder");
+// A lost finish response must not create a second published file.
+int completedCount = host.Items.Count;
+var retryBegin = await client.PostAsJsonAsync("/api/transfers/begin", new { name = "native.txt", size = uploaded.Length, resumeId = id });
+retryBegin.EnsureSuccessStatusCode();
+var receipt = await retryBegin.Content.ReadFromJsonAsync<JsonElement>();
+if (!receipt.GetProperty("complete").GetBoolean() || receipt.GetProperty("id").GetString() != id
+    || receipt.GetProperty("sha256").GetString() != Convert.ToHexString(SHA256.HashData(uploaded)).ToLowerInvariant())
+    throw new Exception("Completed upload receipt did not survive retry");
+var retryFinish = await client.PostAsJsonAsync($"/api/transfers/{id}/finish?sha256={Convert.ToHexString(SHA256.HashData(uploaded)).ToLowerInvariant()}", new {});
+retryFinish.EnsureSuccessStatusCode();
+if (host.Items.Count != completedCount) throw new Exception("Finish retry duplicated a file");
+if ((await client.PostAsJsonAsync($"/api/transfers/{id}/finish?sha256={new string('0', 64)}", new {})).StatusCode != System.Net.HttpStatusCode.Conflict)
+    throw new Exception("Receipt accepted a different checksum");
+if ((await client.PostAsJsonAsync("/api/transfers/begin", new { name = "wrong.txt", size = uploaded.Length, resumeId = id })).StatusCode != System.Net.HttpStatusCode.Conflict)
+    throw new Exception("Receipt was replayed for a different file");
+if ((await client.PostAsJsonAsync("/api/transfers/begin", new { name = "native.txt", size = uploaded.Length, resumeId = new string('f', 32) })).StatusCode != System.Net.HttpStatusCode.Conflict)
+    throw new Exception("Unknown session silently restarted");
+var cancellable = await client.PostAsJsonAsync("/api/transfers/begin", new { name = "cancel.txt", size = 100 });
+cancellable.EnsureSuccessStatusCode();
+string cancelId = (await cancellable.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetString()!;
+(await client.DeleteAsync($"/api/transfers/{cancelId}")).EnsureSuccessStatusCode();
+if (File.Exists(Path.Combine(host.StorageDirectory, cancelId + ".part"))) throw new Exception("Cancelled partial still exists");
+if ((await client.PostAsJsonAsync("/api/transfers/begin", new { name = "cancel.txt", size = 100, resumeId = cancelId })).StatusCode != System.Net.HttpStatusCode.Conflict)
+    throw new Exception("Cancelled session could still resume");
+(await client.DeleteAsync($"/api/transfers/{id}")).EnsureSuccessStatusCode();
+if (!File.Exists(Path.Combine(host.StorageDirectory, id + ".bin"))) throw new Exception("Cancel deleted a completed file");
+using (var rangeRequest = new HttpRequestMessage(HttpMethod.Get, $"/api/files/{id}"))
+{
+    rangeRequest.Headers.Range = new System.Net.Http.Headers.RangeHeaderValue(7, null);
+    using var rangeResponse = await client.SendAsync(rangeRequest);
+    if (rangeResponse.StatusCode != System.Net.HttpStatusCode.PartialContent
+        || rangeResponse.Content.Headers.ContentRange?.From != 7
+        || rangeResponse.Content.Headers.ContentRange?.Length != uploaded.Length
+        || !(await rangeResponse.Content.ReadAsByteArrayAsync()).SequenceEqual(uploaded.Skip(7)))
+        throw new Exception("Range download did not honor the committed byte offset");
+}
 var downloaded = await client.GetByteArrayAsync($"/api/files/{id}");
 if (!uploaded.SequenceEqual(downloaded)) throw new Exception("SHA-256 roundtrip mismatch");
 var items = await client.GetFromJsonAsync<JsonElement>("/api/items");
@@ -291,4 +327,4 @@ finally { if (Directory.Exists(directSource)) Directory.Delete(directSource, tru
 var devices = host.PairedDevices;
 if (devices.Count == 0 || !host.RevokePeer(devices[0].TokenHash)) throw new Exception("Cannot revoke paired device");
 if ((await client.GetAsync("/api/items")).StatusCode != System.Net.HttpStatusCode.Unauthorized) throw new Exception("Revoked token still works");
-Console.WriteLine("Nerqo native encrypted LAN smoke: TLS, pairing, files, SHA256, peer revocation PASSED");
+Console.WriteLine("Nerqo native encrypted LAN smoke: TLS, pairing, files, SHA256, receipts, range resume, cancellation, peer revocation PASSED");

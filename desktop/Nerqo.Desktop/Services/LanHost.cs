@@ -39,6 +39,11 @@ internal sealed class UploadRecord
     public string FolderId { get; set; } = "";
     public string RelativePath { get; set; } = "";
 }
+internal sealed class CompletedUploadRecord
+{
+    public UploadRecord Upload { get; set; } = new();
+    public string Sha256 { get; set; } = "";
+}
 internal sealed class FolderRecord
 {
     public string Owner { get; set; } = "";
@@ -58,6 +63,7 @@ internal sealed class PersistedData
 {
     public Dictionary<string, PeerRecord> Peers { get; set; } = new();
     public Dictionary<string, UploadRecord> Uploads { get; set; } = new();
+    public Dictionary<string, CompletedUploadRecord> CompletedUploads { get; set; } = new();
     public Dictionary<string, FolderRecord> Folders { get; set; } = new();
     public Dictionary<string, OutgoingFolder> OutgoingFolders { get; set; } = new();
     public List<TransferItem> Items { get; set; } = new();
@@ -135,6 +141,7 @@ public sealed class LanHost : IAsyncDisposable
             {
                 state = JsonSerializer.Deserialize<PersistedData>(File.ReadAllText(data)) ?? new();
                 state.Folders ??= new();
+                state.CompletedUploads ??= new();
                 state.OutgoingFolders ??= new();
                 foreach (var entry in state.OutgoingFolders)
                     if (Directory.Exists(entry.Value.Root)) outgoingFolders[entry.Key] = entry.Value;
@@ -286,7 +293,7 @@ public sealed class LanHost : IAsyncDisposable
             catch (BadHttpRequestException e) { if (!ctx.Response.HasStarted) { ctx.Response.StatusCode = e.StatusCode; await ctx.Response.WriteAsJsonAsync(new { error = e.Message }); } }
             catch (JsonException) { if (!ctx.Response.HasStarted) { ctx.Response.StatusCode = 400; await ctx.Response.WriteAsJsonAsync(new { error = "Invalid JSON" }); } }
         });
-        app.MapGet("/api/status", (HttpContext ctx) => Results.Json(new { name = Environment.MachineName, authorized = Authorize(ctx) != null, port = Port, version = "1.0.1", band = WifiInspector.GetBand() }));
+        app.MapGet("/api/status", (HttpContext ctx) => Results.Json(new { name = Environment.MachineName, authorized = Authorize(ctx) != null, port = Port, version = "1.0.2", transferProtocol = 2, band = WifiInspector.GetBand() }));
         app.MapPost("/api/pair", async (HttpContext ctx) =>
         {
             string ip = ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown";
@@ -383,7 +390,15 @@ public sealed class LanHost : IAsyncDisposable
                     var completed = state.Items.FirstOrDefault(i => i.FolderId == folderId
                         && i.Content == relative && i.Kind == "file" && i.Size == size);
                     if (completed != null && File.Exists(Path.Combine(StorageDirectory, completed.Id + ".bin")))
-                        return Results.Json(new { complete = true, sha256 = completed.Sha256, size });
+                        return Results.Json(new { id = completed.Id, complete = true, sha256 = completed.Sha256, size });
+                }
+                if (resume != null && state.CompletedUploads.TryGetValue(resume, out var receipt))
+                {
+                    var saved = receipt.Upload;
+                    if (saved.Owner != owner || saved.Name != name || saved.Size != size || saved.FolderId != folderId || saved.RelativePath != relative)
+                        return Results.Conflict();
+                    if (!File.Exists(Path.Combine(StorageDirectory, resume + ".bin"))) return Results.StatusCode(410);
+                    return Results.Json(new { id = resume, complete = true, sha256 = receipt.Sha256, size });
                 }
                 if (resume != null && state.Uploads.TryGetValue(resume, out var existing))
                 {
@@ -395,6 +410,7 @@ public sealed class LanHost : IAsyncDisposable
                     Save();
                     return Results.Json(new { id = existing.Id, offset = existing.Offset, size = existing.Size });
                 }
+                if (resume != null) return Results.Conflict();
                 string id = Id(); File.WriteAllBytes(Part(id), Array.Empty<byte>());
                 state.Uploads[id] = new UploadRecord { Id = id, Owner = owner, Name = name, Size = size, FolderId = folderId, RelativePath = relative };
                 Save(); return Results.Json(new { id, offset = 0L, size });
@@ -432,6 +448,14 @@ public sealed class LanHost : IAsyncDisposable
                 return Results.BadRequest();
             lock (gate)
             {
+                if (state.CompletedUploads.TryGetValue(id, out var receipt))
+                {
+                    if (receipt.Upload.Owner != Digest(Bearer(ctx)!)) return Results.StatusCode(403);
+                    if (!receipt.Sha256.Equals(expectedHash, StringComparison.OrdinalIgnoreCase)) return Results.Conflict();
+                    return File.Exists(Path.Combine(StorageDirectory, id + ".bin"))
+                        ? Results.Json(new { id, name = receipt.Upload.Name, size = receipt.Upload.Size, sha256 = receipt.Sha256 })
+                        : Results.StatusCode(410);
+                }
                 if (!state.Uploads.TryGetValue(id, out var t) || t.Owner != Digest(Bearer(ctx)!) || t.Offset != t.Size || !File.Exists(Part(id)) || new FileInfo(Part(id)).Length != t.Size) return Results.Conflict();
                 string hash;
                 using (var read = File.OpenRead(Part(id))) hash = Hex(SHA256.HashData(read));
@@ -464,8 +488,25 @@ public sealed class LanHost : IAsyncDisposable
                 var item = new TransferItem { Id = id, Kind = "file", Sender = peer.Name,
                     Content = t.FolderId.Length > 0 ? t.RelativePath : t.Name,
                     FolderId = t.FolderId, Size = t.Size, Sha256 = hash };
-                state.Items.Add(item); state.Uploads.Remove(id); Save();
+                state.Items.Add(item);
+                state.CompletedUploads[id] = new CompletedUploadRecord { Upload = t, Sha256 = hash };
+                state.Uploads.Remove(id); Save();
                 return Results.Json(new { id, name = t.Name, size = t.Size, sha256 = hash });
+            }
+        });
+        app.MapDelete("/api/transfers/{id}", (string id, HttpContext ctx) =>
+        {
+            if (Authorize(ctx) == null) return Unauthorized();
+            ValidId(id);
+            string owner = Digest(Bearer(ctx)!);
+            lock (gate)
+            {
+                if (state.CompletedUploads.TryGetValue(id, out var done))
+                    return done.Upload.Owner == owner ? Results.Json(new { complete = true }) : Results.StatusCode(403);
+                if (!state.Uploads.TryGetValue(id, out var upload)) return Results.NotFound();
+                if (upload.Owner != owner) return Results.StatusCode(403);
+                File.Delete(Part(id)); state.Uploads.Remove(id); Save();
+                return Results.Json(new { cancelled = true });
             }
         });
         // A native folder never gets packed into ZIP. Android requests a

@@ -131,10 +131,16 @@ internal object NativeClient {
         conn.instanceFollowRedirects = false
         conn.setRequestProperty("Accept", "application/json")
         if (token != null) conn.setRequestProperty("Authorization", "Bearer $token")
+        TransferControl.current.get()?.attach(conn) { conn.disconnect() }
         return conn
+    }
+    private fun close(conn: HttpURLConnection) {
+        TransferControl.current.get()?.detach(conn)
+        conn.disconnect()
     }
     private fun response(conn: HttpURLConnection): JSONObject {
         try {
+            TransferControl.check()
             val status = conn.responseCode
             if (status == 401) throw PairingExpiredException()
             if (status !in 200..299) {
@@ -142,7 +148,7 @@ internal object NativeClient {
                 throw NativeHttpException(status, "Nerqo HTTP $status: $message")
             }
             return JSONObject(conn.inputStream.bufferedReader().use { it.readText() })
-        } finally { conn.disconnect() }
+        } finally { close(conn) }
     }
     private fun postJson(endpoint: String, path: String, json: JSONObject, token: String? = null): JSONObject {
         val conn = connect(endpoint + path, "POST", token)
@@ -150,8 +156,11 @@ internal object NativeClient {
         conn.setRequestProperty("Content-Type", "application/json")
         val bytes = json.toString().toByteArray(Charsets.UTF_8)
         conn.setFixedLengthStreamingMode(bytes.size)
-        conn.outputStream.use { it.write(bytes) }
-        return response(conn)
+        try {
+            TransferControl.check()
+            conn.outputStream.use { it.write(bytes) }
+            return response(conn)
+        } finally { close(conn) }
     }
     fun status(device: Device): JSONObject = response(connect(device.endpoint + "/api/status", "GET"))
     fun pair(device: Device, pin: String): String = postJson(device.endpoint, "/api/pair", JSONObject()
@@ -180,7 +189,7 @@ internal object NativeClient {
     }
 
     fun sendFile(context: Context, device: Device, token: String, uri: Uri, allowResume: Boolean = true,
-                 folderId: String? = null, relativePath: String? = null,
+                 folderId: String? = null, relativePath: String? = null, sessionId: String? = null,
                  progress: (Long, Long) -> Unit) {
         val resolver = context.contentResolver
         var size = -1L
@@ -202,11 +211,12 @@ internal object NativeClient {
         }
         if (size < 0 || size > 2L * 1024 * 1024 * 1024 * 1024) throw IOException("Cannot determine file size")
         // Transfer identities survive interruptions for the same URI and same device.
-        val key = "resume_" + device.address + "_" +
+        TransferControl.check()
+        val key = (if (sessionId == null) "resume_" + device.address + "_" else "upload_" + sessionId + "_") +
             sha((uri.toString() + "|" + size + "|" + (folderId ?: "") + "|" +
                 (relativePath ?: "")).toByteArray(Charsets.UTF_8))
         val prefs = context.getSharedPreferences("nerqo_native", Context.MODE_PRIVATE)
-        val resume = if (allowResume) prefs.getString(key, null) else null
+        val resume = if (allowResume) prefs.getString(key, null)?.removePrefix("complete:") else null
         val body = JSONObject().put("name", name).put("size", size)
         if (folderId != null && relativePath != null) {
             body.put("folderId", folderId)
@@ -232,6 +242,7 @@ internal object NativeClient {
             resolver.openInputStream(uri)?.use { input ->
                 val checkBuffer = ByteArray(256 * 1024)
                 while (true) {
+                    TransferControl.check()
                     val n = input.read(checkBuffer)
                     if (n < 0) break
                     digest.update(checkBuffer, 0, n)
@@ -239,12 +250,16 @@ internal object NativeClient {
             } ?: throw IOException("Cannot check previously transferred folder file")
             if (shaDigest(digest) != expected)
                 throw IOException("This file changed since the folder transfer. Start a new folder transfer.")
-            prefs.edit().remove(key).apply()
+            if (sessionId == null) prefs.edit().remove(key).apply()
+            else transfer.optString("id").takeIf { it.matches(Regex("[0-9a-f]{32}")) }?.let {
+                prefs.edit().putString(key, "complete:" + it).apply()
+            }
             progress(size, size)
             return
         }
         val id = transfer.getString("id")
         var offset = transfer.getLong("offset")
+        if (offset !in 0..size) throw IOException("Invalid upload resume offset")
         if (allowResume) prefs.edit().putString(key, id).apply()
         val wholeFileDigest = MessageDigest.getInstance("SHA-256")
         resolver.openInputStream(uri)?.use { input ->
@@ -254,16 +269,20 @@ internal object NativeClient {
             var skipped = 0L
             val prefix = ByteArray(256 * 1024)
             while (skipped < offset) {
+                TransferControl.check()
                 val read = input.read(prefix, 0, minOf(prefix.size.toLong(), offset - skipped).toInt())
                 if (read <= 0) throw IOException("Cannot resume: source file was shortened")
                 wholeFileDigest.update(prefix, 0, read)
                 skipped += read
             }
             val buffer = ByteArray(MAX_CHUNK)
+            progress(offset, size)
             while (offset < size) {
+                TransferControl.check()
                 var used = 0
                 val remaining = minOf(buffer.size.toLong(), size - offset).toInt()
                 while (used < remaining) {
+                    TransferControl.check()
                     val n = input.read(buffer, used, remaining - used)
                     if (n < 0) throw IOException("File changed during transfer")
                     used += n
@@ -274,8 +293,13 @@ internal object NativeClient {
                 conn.setRequestProperty("Content-Type", "application/octet-stream")
                 conn.setRequestProperty("X-Offset", offset.toString())
                 conn.setRequestProperty("X-SHA256", sha(buffer.copyOf(used)))
-                conn.outputStream.use { it.write(buffer, 0, used) }
-                offset = response(conn).getLong("offset")
+                try {
+                    TransferControl.check()
+                    conn.outputStream.use { it.write(buffer, 0, used) }
+                    val acknowledged = response(conn).getLong("offset")
+                    if (acknowledged != offset + used) throw IOException("Unexpected upload acknowledgement")
+                    offset = acknowledged
+                } finally { close(conn) }
                 wholeFileDigest.update(buffer, 0, used)
                 progress(offset, size)
             }
@@ -283,68 +307,78 @@ internal object NativeClient {
         val expectedFileHash = shaDigest(wholeFileDigest)
         postJson(device.endpoint, "/api/transfers/$id/finish?sha256=" + expectedFileHash,
             JSONObject(), token)
-        if (allowResume) prefs.edit().remove(key).apply()
+        if (allowResume && sessionId == null) prefs.edit().remove(key).apply()
+        else if (allowResume) prefs.edit().putString(key, "complete:" + id).apply()
     }
     fun outgoingFolderManifest(device: Device, token: String, id: String): JSONObject {
         require(id.matches(Regex("[0-9a-f]{32}")))
         return response(connect(device.endpoint + "/api/outgoing-folders/" + id + "/manifest", "GET", token))
     }
 
+    private fun receiveTo(context: Context, device: Device, token: String, path: String,
+                          size: Long, expectedSha: String, target: Uri, sessionId: String,
+                          progress: (Long, Long) -> Unit) {
+        val prefs = context.getSharedPreferences("nerqo_downloads", Context.MODE_PRIVATE)
+        val key = "download_" + sessionId + "_" + sha((device.endpoint + "|" + path + "|" + target + "|" + expectedSha + "|" + size).toByteArray())
+        val record = JSONObject().put("uri", target.toString()).put("offset", 0).put("verified", false)
+        val previous = prefs.getString(key, null)?.let { JSONObject(it).getLong("offset") } ?: 0L
+        val control = TransferControl.current.get() ?: TransferControl()
+        SafDownloadTarget(context, target).use { destination ->
+            ResumableDownload.copy(destination, size, expectedSha, previous, remote = { offset ->
+                val conn = connect(device.endpoint + path, "GET", token)
+                if (offset > 0L) conn.setRequestProperty("Range", "bytes=" + offset + "-")
+                try {
+                    control.checkpoint()
+                    val status = conn.responseCode
+                    if (status == 401) throw PairingExpiredException()
+                    if (status !in listOf(200, 206)) throw NativeHttpException(status, "Download unavailable: HTTP " + status)
+                    DownloadResponse(status, conn.getHeaderField("Content-Range"), conn.inputStream) { close(conn) }
+                } catch (error: Exception) { close(conn); throw error }
+            }, checkpoint = { offset ->
+                record.put("offset", offset)
+                if (!prefs.edit().putString(key, record.toString()).commit()) throw IOException("Could not save download checkpoint")
+            }, progress = progress, control = control)
+            record.put("offset", size).put("verified", true)
+            if (!prefs.edit().putString(key, record.toString()).commit()) throw IOException("Could not save verified download receipt")
+        }
+    }
     fun saveOutgoingFolderFile(context: Context, device: Device, token: String, id: String,
                                relative: String, size: Long, expectedSha: String, target: Uri,
-                               progress: (Long, Long) -> Unit) {
+                               sessionId: String, progress: (Long, Long) -> Unit) {
         require(id.matches(Regex("[0-9a-f]{32}")))
-        if (!expectedSha.matches(Regex("[0-9a-f]{64}")) || size < 0) throw IOException("Invalid folder member metadata")
         val encoded = java.net.URLEncoder.encode(relative, "UTF-8")
-        val conn = connect(device.endpoint + "/api/outgoing-folders/" + id + "/file?path=" + encoded,
-            "GET", token)
-        try {
-            if (conn.responseCode != 200) throw IOException("Folder file unavailable: HTTP " + conn.responseCode)
-            val digest = MessageDigest.getInstance("SHA-256")
-            var length = 0L
-            context.contentResolver.openOutputStream(target, "w")?.use { output ->
-                conn.inputStream.use { input ->
-                    val chunk = ByteArray(256 * 1024)
-                    while (true) {
-                        val count = input.read(chunk)
-                        if (count < 0) break
-                        length += count
-                        if (length > size) throw IOException("Unexpected oversized folder member")
-                        output.write(chunk, 0, count)
-                        digest.update(chunk, 0, count)
-                        progress(length, size)
-                    }
-                    output.flush()
-                }
-            } ?: throw IOException("Storage provider did not allow writing")
-            if (length != size || shaDigest(digest) != expectedSha)
-                throw IOException("Folder file checksum did not match; the source may have changed")
-        } finally { conn.disconnect() }
+        receiveTo(context, device, token, "/api/outgoing-folders/" + id + "/file?path=" + encoded,
+            size, expectedSha, target, sessionId, progress)
     }
-
-    fun download(context: Context, device: Device, token: String, item: SharedEntry, target: Uri, progress: (Long, Long) -> Unit) {
-        val conn = connect(device.endpoint + "/api/files/${item.id}", "GET", token)
-        try {
-            if (conn.responseCode != 200) throw IOException("Download not available: HTTP ${conn.responseCode}")
-            val digest = MessageDigest.getInstance("SHA-256")
-            context.contentResolver.openOutputStream(target, "w")?.use { output ->
-                conn.inputStream.use { input ->
-                    val buffer = ByteArray(1024 * 1024)
-                    var received = 0L
-                    while (true) {
-                        val count = input.read(buffer)
-                        if (count < 0) break
-                        output.write(buffer, 0, count)
-                        digest.update(buffer, 0, count)
-                        received += count
-                        progress(received, item.size)
-                    }
-                    output.flush()
-                    if (received != item.size || shaDigest(digest) != item.sha256)
-                        throw IOException("Downloaded file failed SHA-256 verification")
+    fun download(context: Context, device: Device, token: String, item: SharedEntry, target: Uri,
+                 sessionId: String, progress: (Long, Long) -> Unit) {
+        require(item.id.matches(Regex("[0-9a-f]{32}")))
+        receiveTo(context, device, token, "/api/files/" + item.id, item.size, item.sha256, target, sessionId, progress)
+    }
+    fun cleanSession(context: Context, device: Device, token: String?, sessionId: String, cancel: Boolean) {
+        val uploads = context.getSharedPreferences("nerqo_native", Context.MODE_PRIVATE)
+        val edit = uploads.edit()
+        uploads.all.filterKeys { it.startsWith("upload_" + sessionId + "_") }.forEach { (key, value) ->
+            if (cancel && token != null && value is String && value.matches(Regex("[0-9a-f]{32}"))) {
+                runCatching { response(connect(device.endpoint + "/api/transfers/" + value, "DELETE", token)) }
+            }
+            edit.remove(key)
+        }
+        uploads.all.keys.filter { it.startsWith("folder_session_" + sessionId + "_") }.forEach { edit.remove(it) }
+        edit.apply()
+        val downloads = context.getSharedPreferences("nerqo_downloads", Context.MODE_PRIVATE)
+        val downloadEdit = downloads.edit()
+        downloads.all.filterKeys { it.startsWith("download_" + sessionId + "_") }.forEach { (key, value) ->
+            if (cancel && value is String) runCatching {
+                val record = JSONObject(value)
+                if (!record.optBoolean("verified", false)) {
+                    val uri = Uri.parse(record.getString("uri"))
+                    androidx.documentfile.provider.DocumentFile.fromSingleUri(context, uri)?.delete()
                 }
-            } ?: throw IOException("No permission to save selected file")
-        } finally { conn.disconnect() }
+            }
+            downloadEdit.remove(key)
+        }
+        downloadEdit.apply()
     }
     private fun shaDigest(md: MessageDigest) = md.digest().joinToString("") { "%02x".format(Locale.ROOT, it.toInt() and 0xff) }
 }

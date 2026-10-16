@@ -22,7 +22,7 @@ internal object FolderTransfer {
         return part
     }
 
-    fun send(context: Context, device: Device, token: String, tree: Uri,
+    fun send(context: Context, device: Device, token: String, tree: Uri, sessionId: String,
              progress: (Int, String, Long, Long) -> Unit) {
         val root = DocumentFile.fromTreeUri(context, tree)
             ?: throw IOException("Could not read selected Android folder")
@@ -32,7 +32,7 @@ internal object FolderTransfer {
         val hash = MessageDigest.getInstance("SHA-256").digest(
             (device.address + ":" + device.port + ":" + tree.toString()).toByteArray(Charsets.UTF_8)
         ).joinToString("") { "%02x".format(it.toInt() and 0xff) }
-        val key = "folder_transfer_" + hash
+        val key = "folder_session_" + sessionId + "_" + hash
         val previous = preferences.getString(key, null)
         val folderId = if (previous == null) {
             NativeClient.beginFolder(device, token, rootName)
@@ -49,7 +49,9 @@ internal object FolderTransfer {
         var entries = 0
         fun walk(folder: DocumentFile, prefix: String, depth: Int) {
             if (depth > MAX_DEPTH) throw IOException("Folder exceeds maximum nesting")
+            TransferControl.check()
             for (child in folder.listFiles()) {
+                TransferControl.check()
                 if (++entries > MAX_ENTRIES) throw IOException("Too many folder entries")
                 val path = if (prefix.isEmpty()) safeName(child.name)
                     else prefix + "/" + safeName(child.name)
@@ -60,13 +62,12 @@ internal object FolderTransfer {
                     walk(child, path, depth + 1)
                 } else if (child.isFile) {
                     NativeClient.sendFile(context, device, token, child.uri,
-                        folderId = folderId, relativePath = path) { done, total ->
+                        folderId = folderId, relativePath = path, sessionId = sessionId) { done, total ->
                         progress(entries, path, done, total)
                     }
                 }
             }
         }
         walk(root, "", 0)
-        preferences.edit().remove(key).apply()
     }
 }
