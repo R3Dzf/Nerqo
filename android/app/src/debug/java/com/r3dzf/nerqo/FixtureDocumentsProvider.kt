@@ -10,7 +10,7 @@ import android.provider.DocumentsProvider
 import java.io.File
 import java.io.FileNotFoundException
 
-/** Test APK only. Real Android SAF descriptors, directories and rename semantics. */
+/** Debug APK only. Real Android SAF descriptors, directories and rename semantics. */
 class FixtureDocumentsProvider : DocumentsProvider() {
     private val root: File get() = File(context!!.cacheDir, "transport-fixtures").also { it.mkdirs() }
     private fun file(id: String): File {

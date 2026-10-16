@@ -27,20 +27,10 @@ class NativeTransportTest {
     private fun uri(name: String) = DocumentsContract.buildDocumentUri(authority, "root/$name")
     private fun session() = UUID.randomUUID().toString()
     @Before fun trustKnownFixture() {
-        // Starting instrumentation force-stops the target and revokes transient
-        // URI grants. Ask the separate fixture owner after instrumentation starts.
-        context.startActivity(android.content.Intent().setClassName("com.r3dzf.nerqo.test",
-            "com.r3dzf.nerqo.FixtureGrantActivity").addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+        // The debug-only provider shares the instrumented app's UID. Its SAF
+        // cursors/descriptors/rename operations are real; no shell grants or
+        // cross-package Activity lifecycle are part of this transport test.
         val root = DocumentsContract.buildDocumentUri(authority, "root")
-        val tree = DocumentsContract.buildTreeDocumentUri(authority, "root")
-        val flags = android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-        val deadline = android.os.SystemClock.uptimeMillis() + 5000
-        fun allowed(uri: Uri) = context.checkUriPermission(uri, android.os.Process.myPid(), android.os.Process.myUid(), flags) ==
-            android.content.pm.PackageManager.PERMISSION_GRANTED
-        while ((!allowed(root) || !allowed(tree)) && android.os.SystemClock.uptimeMillis() < deadline)
-            Thread.sleep(100)
-        check(allowed(root) && allowed(tree)) { "Fixture owner did not grant document access" }
-        context.contentResolver.takePersistableUriPermission(tree, flags)
         context.contentResolver.query(root, null, null, null, null)?.use {
             assertTrue(it.moveToFirst())
         } ?: error("Test storage did not start")

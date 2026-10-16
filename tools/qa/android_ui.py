@@ -66,7 +66,7 @@ for _ in range(25):
 else:
     raise RuntimeError('Native UI transfer did not complete after resume')
 capture('Transfers')
-received = adb('exec-out', 'run-as', 'com.r3dzf.nerqo.test', 'cat', 'cache/transport-fixtures/ui-resume.bin', binary=True)
+received = adb('exec-out', 'run-as', 'com.r3dzf.nerqo', 'cat', 'cache/transport-fixtures/ui-resume.bin', binary=True)
 expected = bytes(range(256)) * (32 * 4096) + b'ui'
 if hashlib.sha256(received).digest() != hashlib.sha256(expected).digest():
     raise RuntimeError('UI-resumed document does not match the TLS source')
