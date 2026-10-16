@@ -37,6 +37,19 @@ class NativeReleaseTests(unittest.TestCase):
             apply_delta(old, output / patch["name"], rebuilt)
             self.assertEqual(rebuilt.read_bytes(), new.read_bytes())
 
+    def test_stable_pipeline_uses_native_installers_only(self):
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / ".github/workflows/release.yml").read_text(encoding="utf-8")
+        self.assertIn("dotnet publish desktop/Nerqo.Desktop", workflow)
+        self.assertIn("Nerqo-Windows-Setup.exe", workflow)
+        self.assertIn("Nerqo-Android.apk", workflow)
+        self.assertIn("verify_published_apk.py", workflow)
+        self.assertIn("github.ref == 'refs/heads/main'", workflow)
+        self.assertNotIn("pyinstaller", workflow.lower())
+        self.assertNotIn("app.py", workflow)
+        self.assertFalse((root / ".github/workflows/build.yml").exists())
+        self.assertFalse((root / ".github/workflows/publish-locally-signed.yml").exists())
+
     def test_reject_invalid_assets_and_versions(self):
         with tempfile.TemporaryDirectory() as name:
             root = Path(name)

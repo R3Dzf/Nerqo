@@ -63,3 +63,9 @@ Use **Refresh network and QR** in the Windows app after connecting to another Wi
 - Android/Windows receive the folder as a `.zip` file, with the original hierarchy intact; automatic safe extraction is not implemented yet.
 - Limits: up to 100,000 items, 64 directory levels and the existing 2 TB policy, additionally constrained by local free disk space and file-system capabilities.
 - Windows HostSmoke checks the ZIP member hierarchy, empty directory, sample contents and archive SHA-256; Android native builds must succeed before this is promoted.
+
+## Stable native-only release gate
+
+The old PyInstaller/browser `build.yml` and `publish-locally-signed.yml` have been removed **from the native development branch only**. `.github/workflows/release.yml` now compiles WPF and the Android native APK, checks the persistent Android signing certificate, verifies signed APK content against the unsigned build, and packages native Windows setup + signed APK + optional verified deltas. Publishing is restricted to manual workflow runs on `main` with stable tags `v1.0.0+` and only after both platform jobs succeed. Existing `main` / v0.3.0 remain untouched until native readiness is established.
+
+Still required before first Stable: remove Preview labeling from the Windows installer and bump all native versions in lockstep; reproduce the signed Android APK privately with the same permanent certificate; test installation, real Android↔Windows transfers, hotspot operation and upgrade paths on actual devices. The Windows installer currently has no commercial Authenticode publisher signature.
