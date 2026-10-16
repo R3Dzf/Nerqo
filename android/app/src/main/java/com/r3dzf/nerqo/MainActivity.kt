@@ -471,7 +471,7 @@ class MainActivity : ComponentActivity() {
                 } catch (_: Exception) { message = "Cannot join this hotspot automatically. Use Wi-Fi settings." }
             }.show()
     }
-    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == 481) {
             val raw = pendingWifiQr; pendingWifiQr = null
