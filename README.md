@@ -4,7 +4,7 @@
 
 Nerqo is a native Windows and Android application for transferring files, folders, links and text over a local network. A router does not need internet access; the devices can also use an Android hotspot.
 
-> **Development branch:** `dev/native-5ghz-20261016`. Native 1.0.3 adds saved transfer sessions, Pause/Resume/Cancel, byte-range download recovery and idempotent upload completion to the matching Windows/Android interface introduced in 1.0.1. Native CI artifacts are development builds; no official Stable release is claimed. Physical-device acceptance remains required. The `main` branch and older v0.3.0 release are unchanged.
+> **Stable 1.0.3:** Native Windows and Android apps, saved transfers, Pause/Resume/Cancel and verified recovery. [Download both apps](https://github.com/R3Dzf/Nerqo/releases/tag/v1.0.3) · [Release notes and known limits](docs/releases/v1.0.3.md).
 
 ## Native applications
 
@@ -47,7 +47,7 @@ Prefer a **5 GHz** network when both devices and the access point support it. **
 
 ## Security
 
-Nerqo uses local HTTPS/TLS, a persistent Windows certificate identity, Android certificate-fingerprint pinning, a six-digit pairing code and revocable device tokens. This is not a substitute for a full independent security audit. Use trusted private networks while the project is in development.
+Nerqo uses local HTTPS/TLS, a persistent Windows certificate identity, Android certificate-fingerprint pinning, a six-digit pairing code and revocable device tokens. This is not a substitute for a full independent security audit. Use trusted private networks.
 
 Android release signing uses a permanent, pinned public certificate fingerprint. **Private signing keys and passwords must never be committed.** Windows currently does not carry a publisher-trusted Authenticode signature.
 

@@ -1,6 +1,6 @@
 # Nerqo native implementation status
 
-Development branch: `dev/native-5ghz-20261016`. Native version: **1.0.3**.
+Stable LAN/hotspot channel: **1.0.3** on `main`. Development branch: `dev/native-5ghz-20261016`.
 This document records implementation and validation separately. A green build is
 not evidence of a successful transfer between physical Windows/Android devices.
 
@@ -16,7 +16,7 @@ not evidence of a successful transfer between physical Windows/Android devices.
 | 06 Text/links | Two-way text and links; copy; Android share target; explicit Paste button | Optional clipboard sync remains unimplemented; clipboard is read only on explicit Paste |
 | 07 Security | Persistent Windows TLS identity; QR/manual identity verification; Android pinning; revocable peer tokens; path/reparse checks | Independent audit and broader adversarial/lifecycle testing |
 | 08 Connection alternatives | Same LAN; normal phone hotspot; system-managed Android local-only hotspot with generated secure credentials | Native Wi-Fi Direct and Bluetooth transports are not implemented |
-| 09 Delivery/updates | WPF installer; permanent Android certificate pin; stable-only native updater; full/delta reconstruction; coordinated native versioning; source/payload/signing checks; per-user installer 1.0.1 → 1.0.3 tested on a Windows CI runner | Physical in-place upgrade; Windows Authenticode publisher signature; final acceptance before Stable |
+| 09 Delivery/updates | WPF installer; permanent Android certificate pin; stable-only native updater; full/delta reconstruction; coordinated native versioning; source/payload/signing checks; per-user installer 1.0.1 → 1.0.3 tested on a Windows CI runner | Physical in-place upgrade; Windows Authenticode publisher signature; broader physical-device acceptance |
 
 ## UI and identity (1.0.1)
 
@@ -87,11 +87,18 @@ The emulator used the identical production sources at
 `6297e432dac868509403c9affa1a2634d1ae65a6`,
 [UI 38873592044](https://github.com/R3Dzf/Nerqo/actions/runs/38873592044).
 Only a CI path-filter configuration differs between those commits. Both runs
-passed; this records emulated transport and build acceptance, not a Stable
-release or physical radio throughput measurement.
+passed; this records emulated transport and build acceptance. It does not
+measure physical radio throughput. The Stable release gate repeats automated QA.
 
-Before Stable, test QR pairing; files/text/folders both ways with hashes; network
+For broader physical-device acceptance, test QR pairing; files/text/folders both ways with hashes; network
 interruption/retry; cellular disabled; 5 GHz and 2.4 GHz; local hotspot; firewall;
 permissions; low storage; screen sleep; tray exit; install and in-place upgrade
 on the actual Windows PC and Android phone. Wi-Fi Direct/Bluetooth and clipboard
 sync stay marked incomplete until implemented and tested.
+
+## Stable scope
+
+The 1.0.3 Stable channel covers implemented native LAN/hotspot sharing and recovery.
+It does not close all nine roadmap phases. Wi-Fi Direct/Bluetooth, independent
+audit and the physical-device matrix remain explicitly open. See
+[release notes](releases/v1.0.3.md) for supported scope and limitations.

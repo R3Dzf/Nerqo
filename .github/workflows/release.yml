@@ -12,6 +12,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: nerqo-stable-release
+  cancel-in-progress: false
+
 jobs:
   version:
     runs-on: ubuntu-latest
@@ -21,10 +25,17 @@ jobs:
       - uses: actions/checkout@v4
       - id: version
         shell: bash
+        env:
+          REQUESTED_VERSION: ${{ inputs.version }}
         run: |
+          set -euo pipefail
           TAG="v$(grep -m1 'versionName =' android/app/build.gradle.kts | cut -d '"' -f2)"
           [[ "$TAG" =~ ^v[1-9][0-9]*\.[0-9]+\.[0-9]+$ ]]
+          [ -z "$REQUESTED_VERSION" ] || [ "$REQUESTED_VERSION" = "$TAG" ]
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+  android-ui:
+    uses: ./.github/workflows/native-ui.yml
 
   windows-native:
     needs: version
@@ -36,7 +47,16 @@ jobs:
           dotnet-version: '9.0.x'
       - name: Build native WPF (not the legacy Python UI)
         run: dotnet publish desktop/Nerqo.Desktop/Nerqo.Desktop.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:PublishReadyToRun=false -o dist/Windows
-      - name: Test encrypted LAN transport, resumable files and folder archive
+      - name: Capture actual WPF screens
+        shell: pwsh
+        run: |
+          $app = Start-Process -FilePath "$pwd/dist/Windows/Nerqo.exe" -ArgumentList '--ui-smoke' -PassThru
+          if (-not $app.WaitForExit(60000)) { $app.Kill(); throw 'UI smoke timed out' }
+          if ($app.ExitCode -ne 0) { throw "UI smoke exit: $($app.ExitCode)" }
+          foreach ($screen in @('Transfers', 'Devices', 'Settings', 'Transfers-dark')) {
+            if (-not (Test-Path "ui-smoke/$screen.png")) { throw "Missing UI screenshot: $screen" }
+          }
+      - name: Test encrypted LAN transport, resumable files and folder recovery
         run: dotnet run --project desktop/Nerqo.HostSmoke/Nerqo.HostSmoke.csproj -c Release
       - name: Build Windows setup
         shell: pwsh
@@ -45,6 +65,16 @@ jobs:
           & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" installer/Nerqo.iss
           New-Item -ItemType Directory -Force dist/StableWindows
           Copy-Item dist/Installer/Nerqo-Windows-Setup.exe dist/StableWindows/Nerqo-Windows-Setup.exe
+      - name: Build previous native installer and verify in-place upgrade
+        shell: pwsh
+        run: |
+          git fetch --depth 1 origin f512d40c7c4ca9809156202f970553af0f322652
+          git worktree add --detach previous-native f512d40c7c4ca9809156202f970553af0f322652
+          dotnet publish previous-native/desktop/Nerqo.Desktop/Nerqo.Desktop.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:PublishReadyToRun=false -o previous-native/dist/Windows
+          if ($LASTEXITCODE -ne 0) { throw 'Previous native publish failed' }
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" previous-native/installer/Nerqo.iss
+          if ($LASTEXITCODE -ne 0) { throw 'Previous native installer failed' }
+          ./tools/qa/windows_upgrade.ps1 -OldInstaller previous-native/dist/Installer/Nerqo-Windows-Setup.exe -NewInstaller dist/Installer/Nerqo-Windows-Setup.exe
       - uses: actions/upload-artifact@v4
         with:
           name: stable-windows-setup
@@ -71,9 +101,9 @@ jobs:
           python-version: '3.13'
       - name: Run regressions
         run: python -m unittest discover -s tests -q
-      - name: Compile Android native release (unsigned)
+      - name: Test Android recovery and compile native release (unsigned)
         working-directory: android
-        run: gradle :app:assembleRelease --no-daemon
+        run: gradle :app:testDebugUnitTest :app:assembleRelease --no-daemon
       - name: Verify private-release-signed APK against reproducible payload
         env:
           RELEASE_TAG: ${{ inputs.version || needs.version.outputs.tag }}
@@ -83,6 +113,9 @@ jobs:
           VERSION="${RELEASE_TAG#v}"
           APK="downloads/Nerqo-Android-v${VERSION}.apk"
           UNSIGNED="android/app/build/outputs/apk/release/app-release-unsigned.apk"
+          if [ ! -f "$APK" ] && [ -d "downloads/signed-v${VERSION}" ]; then
+            cat "downloads/signed-v${VERSION}"/android.apk.part[0-9][0-9][0-9] > "$APK"
+          fi
           test -f "$APK" || (echo 'Signed Android APK missing. Sign privately first; never commit the signing key.'; exit 1)
           test -f "$UNSIGNED"
           (cd downloads && sha256sum --check --status "Nerqo-Android-v${VERSION}.apk.sha256")
@@ -101,7 +134,7 @@ jobs:
   publish:
     # Never create a Stable release from a development/preview branch.
     if: github.ref == 'refs/heads/main'
-    needs: [version, windows-native, android-signed-verification]
+    needs: [version, windows-native, android-signed-verification, android-ui]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -150,4 +183,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ inputs.version || needs.version.outputs.tag }}
         shell: bash
-        run: gh release create "$RELEASE_TAG" staging/release/* --target "$GITHUB_SHA" --title "Nerqo $RELEASE_TAG" --generate-notes
+        run: |
+          set -euo pipefail
+          (cd staging/release && sha256sum Nerqo-Windows-Setup.exe Nerqo-Android.apk update-manifest.json > SHA256SUMS.txt)
+          gh release create "$RELEASE_TAG" staging/release/* --target "$GITHUB_SHA" --title "Nerqo $RELEASE_TAG Stable" --notes-file "docs/releases/${RELEASE_TAG}.md" --latest

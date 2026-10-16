@@ -1,5 +1,6 @@
 name: Native Android UI smoke
 on:
+  workflow_call:
   push:
     branches: [dev/native-5ghz-20261016]
     paths:
