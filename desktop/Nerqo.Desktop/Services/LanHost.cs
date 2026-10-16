@@ -59,6 +59,7 @@ internal sealed class PersistedData
     public Dictionary<string, PeerRecord> Peers { get; set; } = new();
     public Dictionary<string, UploadRecord> Uploads { get; set; } = new();
     public Dictionary<string, FolderRecord> Folders { get; set; } = new();
+    public Dictionary<string, OutgoingFolder> OutgoingFolders { get; set; } = new();
     public List<TransferItem> Items { get; set; } = new();
 }
 
@@ -134,6 +135,9 @@ public sealed class LanHost : IAsyncDisposable
             {
                 state = JsonSerializer.Deserialize<PersistedData>(File.ReadAllText(data)) ?? new();
                 state.Folders ??= new();
+                state.OutgoingFolders ??= new();
+                foreach (var entry in state.OutgoingFolders)
+                    if (Directory.Exists(entry.Value.Root)) outgoingFolders[entry.Key] = entry.Value;
             }
             catch (JsonException) { throw new IOException("Cannot safely load saved Nerqo state; restore state.json from backup."); }
     }
@@ -489,6 +493,7 @@ public sealed class LanHost : IAsyncDisposable
             foreach (var component in relative.Split('/'))
             {
                 physical = Path.Combine(physical, component);
+                if (!File.Exists(physical) && !Directory.Exists(physical)) return Results.NotFound();
                 if ((File.GetAttributes(physical) & FileAttributes.ReparsePoint) != 0)
                     return Results.StatusCode(403);
             }
@@ -576,9 +581,11 @@ public sealed class LanHost : IAsyncDisposable
         }
         await Scan(rootInfo, "", 0);
         string id = Id();
-        outgoingFolders[id] = new OutgoingFolder(rootInfo.FullName, folderName, dirs, memberFiles);
+        var share = new OutgoingFolder(rootInfo.FullName, folderName, dirs, memberFiles);
+        outgoingFolders[id] = share;
         lock (gate)
         {
+            state.OutgoingFolders[id] = share;
             state.Items.Add(new TransferItem
             {
                 Id = id, Kind = "folder", Sender = "Windows",
