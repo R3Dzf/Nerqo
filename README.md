@@ -1,45 +1,56 @@
-# Nerqo — Native Windows + Android (Development Preview)
+# Nerqo
 
-**Move freely. Stay local.** Transfer files, links, and text between a Windows laptop and Android without an internet connection. Connect both devices to the same Wi-Fi network, or use a mobile hotspot.
+**Move freely. Stay local.**
 
-> **Branch `dev/native-5ghz-20261016`: active native rebuild, not a stable release.** The existing `main` branch and published `v0.3.0` remain unchanged. Do not replace your installed signed Android app with this ephemeral CI debug build.
+Nerqo is a native Windows and Android application for transferring files, folders, links and text over a local network. A router does not need internet access; the devices can also use an Android hotspot.
 
-## Native apps, not browser wrappers
+> **Development branch:** `dev/native-5ghz-20261016`. The native rebuild is not yet a stable release. The `main` branch and the older v0.3.0 release are unchanged.
 
-| Platform | Implementation | Build |
-|---|---|---|
-| Windows | C# .NET 9, WPF window, embedded ASP.NET Core transfer host, tray integration; no console or browser | `dotnet publish desktop/Nerqo.Desktop/Nerqo.Desktop.csproj -c Release -r win-x64 --self-contained true` |
-| Android | Kotlin, Jetpack Compose, native document pickers and share intents; no `WebView` | `cd android && gradle :app:assembleDebug` |
+## Native applications
 
-Preview builds: [Nerqo native CI](https://github.com/R3Dzf/Nerqo/actions/workflows/native-preview.yml). Windows host smoke tests verify pairing/authentication, notes, chunk upload and file round-trip. The native preview workflow also builds a per-user Windows installer and stages an unsigned Android release APK for private offline signing.
+| Windows | Android |
+|---|---|
+| .NET 9 + WPF, normal desktop window | Kotlin + Jetpack Compose |
+| Per-user installer, Start Menu shortcut, system tray | Native document picker and system Share integration |
+| In-process .NET transport host | Native HTTPS client with certificate pinning |
+| No browser or visible command window | No WebView, browser or cloud relay |
 
-## Transfer and pairing
+The old `app.py` / `web/` implementation is retained for migration tests only. It is **not** shipped as the new native Windows app.
 
-1. Run **Nerqo.exe** on Windows. No terminal or browser should open.
-2. Start Nerqo on your Android phone while both devices are connected to the same Wi-Fi or Android hotspot; disable mobile data to confirm offline operation.
-3. Tap **Find nearby Windows device**, select your PC, then enter its six-digit pairing code.
-4. Send text/links/files from either device. On Android, choose **Save** to download Windows-origin files. Android-origin files arrive in `%LOCALAPPDATA%/Nerqo/Received`.
+## Getting connected
 
-If discovery fails, check Windows Firewall allows the app on your **private** network and that your Wi-Fi AP doesn't isolate wireless clients. Enter the private Windows IP in Android as a fallback. UDP 44889 handles discovery; TCP 44888 handles transfers. **No links or IP addresses need to be opened in a browser.**
+1. Put Windows and Android on the **same private Wi-Fi**, even if it has no internet. Alternatively, turn on the phone's hotspot and join it from Windows.
+2. Open Nerqo on Windows. Its local receiver starts inside the app (TCP 44888), and the connection screen displays a pairing QR.
+3. In Nerqo on Android, scan the QR. The app checks the Windows TLS certificate before sending the pairing code.
+4. Confirm the computer's security identity on both devices and approve pairing.
+5. Send files, links or text. Android-received files can be saved using Android's Save dialog; Android-to-Windows files arrive in `%LOCALAPPDATA%\Nerqo\Received`.
 
-## 5 GHz performance
+**No IP address needs to be opened in a browser.** If discovery fails, use the QR or the manual private LAN address. Check whether Windows Firewall blocks TCP 44888 or UDP 44889, or whether the Wi-Fi router has client isolation enabled.
 
-Nerqo detects Wi-Fi frequency where Android/Windows permissions allow. Prefer **5 GHz**, or **6 GHz** if supported by both devices and hotspot/router; the local TCP transport automatically uses the established Wi-Fi radio. Android uses a secure system-selected local-only hotspot; select 5 GHz in system hotspot settings where available, rather than opening an unsecured custom AP. On other Android versions, select 5 GHz in the system hotspot settings if available.
+## File and folder transfers
 
-**No Wi-Fi frequency is guaranteed by software.** 2.4 GHz still works as a fallback. Actual speed depends on your hotspot/router, Wi-Fi chipset, distance, channel width, signal and storage. 4 MiB file chunks, streamed reads/writes and resumable uploads avoid buffering whole files in memory.
+- File uploads: 4 MiB chunks, per-chunk SHA-256 and full-file verification, and resumable uploads after a disconnection.
+- Windows → Android: share one or more files, or select a folder. Folder structures (including empty folders) are preserved in a downloadable ZIP.
+- Android → Windows: send files with the document picker or Android's Share menu; use **Send folder (ZIP)** to transfer a SAF-selected folder.
+- Both folder actions show archive preparation progress. Archives are files, **not automatically extracted** on the destination.
+- ZIP folder staging on Android currently needs enough temporary phone storage. If interrupted, a folder ZIP restarts; individual file uploads already support resume. A direct, no-staging folder transport is planned before the stable release.
 
-## Security and roadmap
+## Wi-Fi / hotspot performance
 
-This is an **early preview for trusted private networks only**. PIN pairing and authenticated bearer tokens work, but LAN transport is currently **HTTP without end-to-end TLS encryption**. Don't use an untrusted public Wi-Fi hotspot. The nine-phase tracker and real-device acceptance tests are in [docs/NATIVE_ROADMAP.md](docs/NATIVE_ROADMAP.md).
+Prefer a **5 GHz** network when both devices and the access point support it. **6 GHz** can be faster under suitable conditions. Nerqo reports the actual available radio band where the OS exposes it; it cannot guarantee or forcibly change bands on every device. The network works on 2.4 GHz as a fallback. No mobile data or internet bandwidth is consumed by the local file transfer.
 
-Pending before stable release: QR pairing and advanced diagnostics, pause/folder UI, encrypted mutual authentication, Wi-Fi Direct and Bluetooth transports, native Windows delta updater and installer, and stable signed release/regression testing. The permanent Android signing certificate from `v0.3.0` must remain unchanged; private keys are never checked into Git.
+## Security
 
-Legacy `app.py` and `web/` are retained temporarily for migration and historical tests; neither is part of the native Windows executable.
+Nerqo uses local HTTPS/TLS, a persistent Windows certificate identity, Android certificate-fingerprint pinning, a six-digit pairing code and revocable device tokens. This is not a substitute for a full independent security audit. Use trusted private networks while the project is in development.
 
-### Encrypted native pairing preview
+Android release signing uses a permanent, pinned public certificate fingerprint. **Private signing keys and passwords must never be committed.** Windows currently does not carry a publisher-trusted Authenticode signature.
 
-Windows displays a 12-character secure identity beside its pairing PIN. Verify that the identical code appears in Android before entering the PIN. Android pins the entire SHA-256 certificate fingerprint; file and note requests use HTTPS. Windows stores its identity private key encrypted with current-user Windows DPAPI. This is a development preview, not a completed security audit.
+## Builds and releases
 
-### 0.5.0 native development preview
+- [Native Windows + Android CI](https://github.com/R3Dzf/Nerqo/actions/workflows/native-preview.yml)
+- [Native implementation roadmap](docs/NATIVE_ROADMAP.md)
+- [Offline Android release signing](docs/OFFLINE_RELEASE_SIGNING.md)
 
-Adds local-only QR pairing with certificate verification, per-device revocation, HTTPS transfers, 5 GHz / 6 GHz band awareness, and signed-Android update continuity. This development branch is not a security-audited or real-device-validated production release.
+The native CI compiles WPF and Android, runs transport tests and produces preview artifacts. The native Stable workflow is manual and gated: only a checked Windows Installer and a release-signed Android APK with matching, independently rebuilt payloads can be published from `main`. It does **not** publish the old Python/browser app.
+
+**Still pending for v1.0 Stable:** tested Wi-Fi Direct/Bluetooth fallbacks (where supported), safe direct folder transfer without ZIP staging, broader network diagnostics, real-device testing on Windows and Android, and verified in-place upgrades. Preview build success does not equal production readiness.
