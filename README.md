@@ -30,10 +30,10 @@ The old `app.py` / `web/` implementation is retained for migration tests only. I
 ## File and folder transfers
 
 - File uploads: 4 MiB chunks, per-chunk SHA-256 and mandatory sender-verified full-file SHA-256 before publication, and resumable uploads after a disconnection.
-- Windows → Android: share one or more files, or select a folder. Folder structures (including empty folders) are preserved in a downloadable ZIP.
+- Windows → Android: share one or more files or a complete folder **directly**, preserving nested directories and empty folders without ZIP staging.
 - Android → Windows: send files with the document picker or Android's Share menu; use **Send folder directly** to transfer an SAF-selected folder file by file, without temporary ZIP staging.
-- Both folder actions show archive preparation progress. Archives are files, **not automatically extracted** on the destination.
-- Android direct folder transfer persists its folder session and each file’s resume offset. After a disconnect it verifies completed files by SHA-256 rather than uploading them twice. Windows → Android still uses a downloadable ZIP archive; direct receiving into an Android folder remains planned.
+- Both folder directions stream files over HTTPS with verified SHA-256. Windows lists folder members in a manifest, and Android creates a folder tree using the system document provider.
+- Android → Windows direct folder transfers persist each file’s resumable upload session. Windows → Android saves members directly to the selected Android folder without ZIP staging. Full-folder download resume and live-device validation are still pending.
 
 ## Wi-Fi / hotspot performance
 
@@ -53,4 +53,4 @@ Android release signing uses a permanent, pinned public certificate fingerprint.
 
 The native CI compiles WPF and Android, runs transport tests and produces preview artifacts. The native Stable workflow is manual and gated: only a checked Windows Installer and a release-signed Android APK with matching, independently rebuilt payloads can be published from `main`. It does **not** publish the old Python/browser app.
 
-**Still pending for v1.0 Stable:** direct Windows → Android folder transport (currently ZIP), tested Wi-Fi Direct/Bluetooth fallbacks (where supported), broader network diagnostics, real-device testing on Windows and Android, and verified in-place upgrades. Preview build success does not equal production readiness.
+**Still pending for v1.0 Stable:** tested Wi-Fi Direct/Bluetooth fallbacks (where supported), broader network diagnostics, real-device testing on Windows and Android, and verified in-place upgrades. Preview build success does not equal production readiness.
