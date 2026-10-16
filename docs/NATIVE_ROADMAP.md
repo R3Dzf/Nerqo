@@ -65,14 +65,14 @@ hardware.
 
 - Native CI builds WPF, runs the authenticated LAN/integrity/Delta smoke suite,
   captures real WPF screens, and builds Android Debug and unsigned Release APKs.
-- Android 35 emulator UI smoke is configured for actual TLS/SAF interrupted downloads, folder retry, a deliberately lost upload-finish reply and cancellation, followed by Compose Pause/Resume and output hash verification. The latest fixture-grant correction is pending execution; do not count the earlier permission failure as a passing transport check.
+- Android 35 emulator smoke passed all five actual TLS/SAF transport checks: interrupted file download, folder retry with empty directories, a deliberately lost upload-finish reply, cancellation before the first byte and mid-file, and saved-job setup. The subsequent native UI smoke restored that job, paused it, resumed it to completion and verified the saved bytes against the source SHA-256. Navigation and light/dark capture passed. The SAF fixture exists only in the Debug build and is excluded from Release.
 - Android JVM tests exercise the saved-member integrity decision with exact,
   empty, truncated, oversized and same-size altered content.
-- The current 1.0.3 local JVM run passed all 15 tests: saved-member integrity,
+- The 1.0.3 CI JVM run passed all 15 tests: saved-member integrity,
   byte-range resume, malformed/ignored ranges, altered/truncated content,
   nonseekable storage and responsive asynchronous stop. The Python regression
-  suite passed 36 tests with one skipped. These do not replace emulator or
-  physical-device acceptance.
+  suite passed all 36 tests in CI (the local JRE-only run skipped one Java
+  compilation check). These do not replace physical-device acceptance.
 - The Stable workflow only publishes from `main`, with both platforms successful
   and a permanent-key-signed APK matching the independently compiled payload.
 - Installer upgrade smoke installs the previous native 1.0.1 build, upgrades to 1.0.3, and checks the persistent TLS identity, authorized device token, shared note and received file. This passed on a disposable Windows CI runner, not the user’s PC.
@@ -80,6 +80,15 @@ hardware.
   installation; do not uninstall the stable installation to try it.
 - The signing private key remains outside the public repository. Builds here do
   not create a replacement key. Windows has no trusted Authenticode signature.
+
+Validated native build source: `13a790c27e89bf4cd3d6bc621a9788a8694083f4`,
+[CI 38873724896](https://github.com/R3Dzf/Nerqo/actions/runs/38873724896).
+The emulator used the identical production sources at
+`6297e432dac868509403c9affa1a2634d1ae65a6`,
+[UI 38873592044](https://github.com/R3Dzf/Nerqo/actions/runs/38873592044).
+Only a CI path-filter configuration differs between those commits. Both runs
+passed; this records emulated transport and build acceptance, not a Stable
+release or physical radio throughput measurement.
 
 Before Stable, test QR pairing; files/text/folders both ways with hashes; network
 interruption/retry; cellular disabled; 5 GHz and 2.4 GHz; local hotspot; firewall;
