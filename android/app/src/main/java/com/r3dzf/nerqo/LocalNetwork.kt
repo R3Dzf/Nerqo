@@ -56,6 +56,7 @@ internal object LocalNetwork {
         val app = context.applicationContext
         val wifi = app.getSystemService(WifiManager::class.java)
         check(!TransferRuntime.running) { "Pause transfers before changing the network" }
+        if (fiveGHz) check(Build.VERSION.SDK_INT >= 36 && wifi.is5GHzBandSupported) { "In-app 5 GHz hotspot needs Android 16 and compatible hardware. Select 5 GHz in system hotspot settings on older phones." }
         val cm = app.getSystemService(ConnectivityManager::class.java)
         request?.let { runCatching { cm.unregisterNetworkCallback(it) } }; request = null; requested = null
         stopHotspot()
@@ -76,7 +77,6 @@ internal object LocalNetwork {
             override fun onFailed(reason: Int) { reservation = null; hotspotText = ""; message("Hotspot unavailable ($reason). Try Auto band or system hotspot settings.") }
         }
         if (fiveGHz) {
-            check(Build.VERSION.SDK_INT >= 36 && wifi.is5GHzBandSupported) { "In-app 5 GHz hotspot needs Android 16 and compatible hardware. Select 5 GHz in system hotspot settings on older phones." }
             // Public Android 16 API permits channel/band selection. Leave credentials
             // unset so Android generates a secured local-only hotspot configuration.
             val channels = android.util.SparseIntArray().apply { put(SoftApConfiguration.BAND_5GHZ, 0) }

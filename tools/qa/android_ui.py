@@ -96,6 +96,7 @@ capture('Transfer-paused')
 resume(must_be_active=True)
 # The foreground service must keep writing while the Activity is stopped and screen is off.
 before = int(adb('shell', 'run-as', 'com.r3dzf.nerqo', 'stat', '-c', '%s', 'cache/transport-fixtures/ui-resume.bin').strip())
+adb('shell', 'settings', 'put', 'global', 'always_finish_activities', '1')
 adb('shell', 'input', 'keyevent', 'KEYCODE_HOME')
 adb('shell', 'input', 'keyevent', 'KEYCODE_SLEEP')
 time.sleep(4)
@@ -108,6 +109,7 @@ if after <= before:
     failure('Saved file did not grow with the Activity stopped and screen off')
 adb('shell', 'input', 'keyevent', 'KEYCODE_WAKEUP')
 adb('shell', 'wm', 'dismiss-keyguard')
+adb('shell', 'settings', 'put', 'global', 'always_finish_activities', '0')
 adb('shell', 'am', 'start', '-W', '-n', 'com.r3dzf.nerqo/.MainActivity')
 for _ in range(25):
     time.sleep(2)

@@ -1,11 +1,14 @@
-Nerqo native 1.0.8 Stable channel
+Nerqo native 1.0.9 Stable channel
 
-Single-pass Windows snapshot preparation with SHA-256 and progress, a saved
-incoming upload queue, and separate persistent History on Windows and Android.
-Windows outgoing deliveries require best-effort verified-client receipts;
-old shares are not imported as completed transfers. Android history upserts
-paused/resumed jobs and retains the latest status across restarts.
+Android user-started foreground transfer service, notification controls and
+checkpoints; temporary Disconnect/Reconnect separated from Forget; pinned
+identity checks before moving paused jobs to a new private address.
 
-Delta-friendly installer packaging, in-place replacement, cached delta bases
-and permanent Android signing continue. All publication gates remain required.
-See docs/releases/v1.0.8.md for scope and physical-device validation limits.
+Durable verified-download receipt retries, History file/open/retry/log clearing,
+Windows measured per-file send/receive controls and optional no-copy source
+sharing, plus Android 16 public 5 GHz hotspot band requests where supported.
+
+Native publication gates, previous-version replacement, delta reconstruction,
+permanent Android signing and independent payload checks remain required.
+Physical radio/Doze/throughput acceptance and trusted Windows Authenticode
+signing are not claimed. See docs/releases/v1.0.9.md.

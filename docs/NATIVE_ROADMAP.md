@@ -1,6 +1,6 @@
 # Nerqo native implementation status
 
-Stable LAN/hotspot channel: **1.0.8**. Development branch: `dev/native-5ghz-20261016`.
+Stable LAN/hotspot channel: **1.0.9**. Development branch: `dev/native-5ghz-20261016`.
 This document records implementation and validation separately. A green build is
 not evidence of a successful transfer between physical Windows/Android devices.
 
@@ -135,3 +135,24 @@ and best-effort verified delivery acknowledgements from the updated client.
 Neither platform treats an available share as proof of completed delivery.
 History has search/status filters and a 500-entry bound. Physical throughput
 benchmarks and Android foreground transfer services remain future work.
+
+## Background service, reconnect and controls (1.0.9)
+
+Android transport runs in a private user-started dataSync foreground service,
+with notification actions, bounded wake/Wi-Fi locks, saved state and explicit
+Android 15 timeout handling. Activity recreation no longer owns its writer.
+Disconnect/Connect now suspend/restore the same credentials; Forget revokes.
+A changed private IP requires the saved TLS fingerprint before credentials are
+sent, and restored jobs retain their original storage checkpoint scope.
+
+Verified downloads persist receipt retries before clearing their job. Both
+History pages expose local file/open or retry actions as applicable and log-only
+clearing. Windows streams have measured per-file progress, ETA and cooperative
+Pause/Resume/Cancel. Fast sharing avoids snapshot copying by retaining a read-only
+source lease, still with a full checksum pass. Persistent snapshots remain the
+default. Android 16 can request a 5 GHz local hotspot via public channel selection,
+with generated secured credentials; actual radio success is hardware-dependent.
+
+Physical 700 MiB throughput, OEM battery/Doze behavior, actual 5 GHz negotiation,
+Windows trusted publisher signing, Wi-Fi Direct and Bluetooth remain open. See
+[1.0.9 release scope](releases/v1.0.9.md) for operational limits and validation.

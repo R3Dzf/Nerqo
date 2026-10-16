@@ -24,7 +24,7 @@ public partial class MainWindow : Window
     private List<TransferHistoryEntry> displayedHistory = new();
     private List<TransferItem> displayedShares = new();
     private List<PairedDevice> displayedPeers = new();
-    private List<LiveTransfer> displayedIncoming = new();
+    private readonly System.Collections.ObjectModel.ObservableCollection<LiveTransferRow> displayedIncoming = new();
     private bool exiting;
     private bool preparing;
     private CancellationTokenSource? preparationCancellation;
@@ -39,6 +39,7 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        IncomingList.ItemsSource = displayedIncoming;
         TransferNav.IsChecked = true;
         try { DarkModeToggle.IsChecked = File.Exists(themeFile) && File.ReadAllText(themeFile) == "dark"; }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { DarkModeToggle.IsChecked = false; }
@@ -168,7 +169,12 @@ public partial class MainWindow : Window
         var peers = service.PairedDevices;
         if (!displayedPeers.SequenceEqual(peers)) { displayedPeers = peers; PeerList.ItemsSource = peers; }
         var incoming = service.Transfers;
-        if (!displayedIncoming.SequenceEqual(incoming)) { displayedIncoming = incoming; IncomingList.ItemsSource = incoming; }
+        var ids = incoming.Select(x => x.Id).ToHashSet();
+        foreach (var removed in displayedIncoming.Where(x => !ids.Contains(x.Value.Id)).ToArray()) displayedIncoming.Remove(removed);
+        foreach (var item in incoming) {
+            var row = displayedIncoming.FirstOrDefault(x => x.Value.Id == item.Id);
+            if (row == null) displayedIncoming.Add(new LiveTransferRow(item)); else row.Update(item);
+        }
         EmptyIncomingLabel.Visibility = incoming.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         HistoryWarningLabel.Text = service.HistoryWarning;
         HistoryWarningLabel.Visibility = service.HistoryWarning.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
@@ -189,7 +195,10 @@ public partial class MainWindow : Window
     private void ForgetSelectedPeer(object s, RoutedEventArgs e) {
         if (PeerList.SelectedItem is PairedDevice peer && MessageBox.Show($"Remove saved access for {peer.Name}? Pair again using QR to reconnect.", "Forget device", MessageBoxButton.YesNo) == MessageBoxResult.Yes) service.RevokePeer(peer.TokenHash);
     }
-    private void ControlTransfer(object s, RoutedEventArgs e) { if (s is System.Windows.Controls.Button { DataContext: LiveTransfer transfer, Tag: string action }) service.ControlTransfer(transfer.Id, action); }
+    private void ControlTransfer(object s, RoutedEventArgs e) {
+        try { if (s is System.Windows.Controls.Button { DataContext: LiveTransferRow transfer, Tag: string action }) service.ControlTransfer(transfer.Value.Id, action); }
+        catch (Exception ex) { FooterLabel.Text = "Could not change transfer: " + ex.Message; }
+    }
     private void ClearHistory(object s, RoutedEventArgs e) {
         if (MessageBox.Show("Clear the transfer log? Your files will be kept.", "Clear History", MessageBoxButton.YesNo) != MessageBoxResult.Yes) return;
         try { service.ClearHistory(); RefreshItems(); } catch (Exception ex) { FooterLabel.Text = ex.Message; }
@@ -385,6 +394,18 @@ public partial class MainWindow : Window
     {
         try { Process.Start(new ProcessStartInfo(target) { UseShellExecute = true }); }
         catch (Exception) { FooterLabel.Text = "Open Windows Settings → Privacy & security → Windows Security → Firewall & network protection."; }
+    }
+    private sealed class LiveTransferRow(LiveTransfer value) : System.ComponentModel.INotifyPropertyChanged
+    {
+        public LiveTransfer Value { get; private set; } = value;
+        public string Name => Value.Name;
+        public string Detail => Value.Detail;
+        public double Percent => Value.Percent;
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        public void Update(LiveTransfer next) {
+            if (Value == next) return;
+            Value = next; PropertyChanged?.Invoke(this, new System.ComponentModel.PropertyChangedEventArgs(null));
+        }
     }
     private sealed record HistoryRow(TransferHistoryEntry Entry)
     {

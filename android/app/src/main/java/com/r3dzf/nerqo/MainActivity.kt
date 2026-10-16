@@ -266,7 +266,35 @@ class MainActivity : ComponentActivity() {
     }
     private fun reconnect() {
         val current = device ?: return
-        select(current)
+        val identity = prefs.getString("cert_${current.address}:${current.port}", null) ?: prefs.getString("saved_identity", null)
+        val savedAccess = prefs.getString("token_${current.address}", null)
+            ?: if (prefs.getString("saved_identity", null) == identity) prefs.getString("saved_token", null) else null
+        if (identity == null || savedAccess == null) { message = "Scan the pairing QR to restore access"; return }
+        sessionGeneration++
+        task {
+            var last: Exception? = null
+            val candidates = (listOf(current) + NativeClient.discover()).distinctBy { it.endpoint }
+            for (candidate in candidates) try {
+                // A discovery name or IP never authorizes sending saved credentials.
+                if (NativeClient.previewIdentity(candidate) != identity) continue
+                require(pendingTransfer == null || pendingTransfer!!.fingerprint == identity) { "Saved transfer belongs to another computer" }
+                NativeClient.trustIdentity(candidate, identity)
+                NativeClient.reconnect(candidate, savedAccess)
+                val fresh = NativeClient.list(candidate, savedAccess)
+                prefs.edit().putString("host", candidate.address).putInt("port", candidate.port).putString("name", candidate.name)
+                    .putString("cert_${candidate.address}:${candidate.port}", identity).putString("token_${candidate.address}", savedAccess)
+                    .putString("saved_identity", identity).putString("saved_token", savedAccess).putBoolean("disconnected", false).apply()
+                val moved = pendingTransfer?.copy(host = candidate.address, port = candidate.port)
+                moved?.save(this)
+                ReceiptOutbox.schedule(this)
+                runOnUiThread { pendingTransfer = moved; device = candidate; token = savedAccess; entries = fresh; connected = true; message = "Reconnected securely to ${candidate.name}" }
+                return@task
+            } catch (error: PairingExpiredException) {
+                runOnUiThread { device = candidate; token = null; connected = false; previewFingerprint = identity; showPair = true; message = "Pairing expired. Verify identity and pair again." }
+                return@task
+            } catch (error: Exception) { last = error }
+            throw IOException("Saved computer unavailable. Check Wi-Fi/Hotspot and Windows receiver, then Reconnect. " + (last?.message ?: ""))
+        }
     }
     private fun forget() {
         TransferRuntime.message = ""
