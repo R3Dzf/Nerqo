@@ -165,6 +165,9 @@ internal object NativeClient {
     fun status(device: Device): JSONObject = response(connect(device.endpoint + "/api/status", "GET"))
     fun pair(device: Device, pin: String): String = postJson(device.endpoint, "/api/pair", JSONObject()
         .put("pin", pin).put("name", android.os.Build.MODEL)).getString("token")
+    fun disconnect(device: Device, token: String) {
+        postJson(device.endpoint, "/api/disconnect", JSONObject(), token)
+    }
     fun list(device: Device, token: String): List<SharedEntry> {
         val entries = response(connect(device.endpoint + "/api/items", "GET", token)).getJSONArray("items")
         return (0 until entries.length()).map { i ->

@@ -1,6 +1,6 @@
 # Nerqo native implementation status
 
-Stable LAN/hotspot channel: **1.0.5**. Development branch: `dev/native-5ghz-20261016`.
+Stable LAN/hotspot channel: **1.0.5**; **1.0.6** candidate under validation. Development branch: `dev/native-5ghz-20261016`.
 This document records implementation and validation separately. A green build is
 not evidence of a successful transfer between physical Windows/Android devices.
 

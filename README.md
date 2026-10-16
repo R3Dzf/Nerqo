@@ -4,7 +4,7 @@
 
 Nerqo is a native Windows and Android application for transferring files, folders, links and text over a local network. A router does not need internet access; the devices can also use an Android hotspot.
 
-> **Stable 1.0.5:** Native Windows and Android apps, saved transfers, Pause/Resume/Cancel and verified recovery. [Download both apps](https://github.com/R3Dzf/Nerqo/releases/tag/v1.0.5) · [Release notes and known limits](docs/releases/v1.0.5.md).
+> **Stable 1.0.6:** Native Windows and Android apps, saved transfers, Pause/Resume/Cancel and verified recovery. [Download both apps](https://github.com/R3Dzf/Nerqo/releases/tag/v1.0.6) · [Release notes and known limits](docs/releases/v1.0.6.md).
 
 ## Native applications
 

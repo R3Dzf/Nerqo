@@ -39,6 +39,11 @@ class NativeTransportTest {
     private fun pauseAtFourMiB(control: TransferControl, done: Long) {
         if(done >= 4L * 1024 * 1024) control.interrupt(TransferStop.PAUSE)
     }
+    @Test fun test00ScannerIsPortraitAndPrivate() {
+        val info = context.packageManager.getActivityInfo(android.content.ComponentName(context, PortraitCaptureActivity::class.java), 0)
+        assertEquals(android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT, info.screenOrientation)
+        assertFalse(info.exported)
+    }
     @Test fun test01SafDownloadResumesAfterClosingDescriptorsAndNewControl() {
         val target = uri("download.bin")
         val id = session()

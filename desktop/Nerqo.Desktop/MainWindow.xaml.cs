@@ -159,8 +159,8 @@ public partial class MainWindow : Window
     private void RevokeSelectedPeer(object s, RoutedEventArgs e)
     {
         if (PeerList.SelectedItem is not PairedDevice peer) return;
-        if (MessageBox.Show($"Remove {peer.Name} from trusted devices? They will need to pair again.", "Revoke access", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
-        if (service.RevokePeer(peer.TokenHash)) { RefreshItems(); FooterLabel.Text = $"Access removed: {peer.Name}"; }
+
+        if (service.RevokePeer(peer.TokenHash)) { RefreshItems(); FooterLabel.Text = $"Disconnected: {peer.Name}. Scan the pairing QR to reconnect; Wi-Fi stays connected."; }
     }
     private void CopyPairCode(object s, RoutedEventArgs e)
     {
@@ -318,6 +318,7 @@ public partial class MainWindow : Window
         finally { await RefreshFirewallAsync(); }
     }
     private void OpenFirewallSettings(object sender, RoutedEventArgs e) => OpenSystemSettings("windowsdefender://network/");
+    private void OpenHotspotSettings(object sender, RoutedEventArgs e) => OpenSystemSettings("ms-settings:network-mobilehotspot");
     private void OpenNetworkSettings(object sender, RoutedEventArgs e) => OpenSystemSettings("ms-settings:network-status");
     private void OpenSystemSettings(string target)
     {

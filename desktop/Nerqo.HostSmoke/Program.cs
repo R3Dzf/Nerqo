@@ -400,7 +400,18 @@ try
 }
 finally { if (Directory.Exists(directSource)) Directory.Delete(directSource, true); }
 
+using (var anonymous = new HttpClient(handler, disposeHandler: false) { BaseAddress = client.BaseAddress })
+    if ((await anonymous.PostAsJsonAsync("/api/disconnect", new {})).StatusCode != System.Net.HttpStatusCode.Unauthorized)
+        throw new Exception("Unauthenticated disconnect was accepted");
+var anotherPair = await client.PostAsJsonAsync("/api/pair", new { pin = host.PairCode, name = "Other smoke phone" });
+anotherPair.EnsureSuccessStatusCode();
+string anotherToken = (await anotherPair.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("token").GetString()!;
+(await client.PostAsJsonAsync("/api/disconnect", new {})).EnsureSuccessStatusCode();
+if ((await client.GetAsync("/api/items")).StatusCode != System.Net.HttpStatusCode.Unauthorized)
+    throw new Exception("Disconnected client still has access");
+client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", anotherToken);
+(await client.GetAsync("/api/items")).EnsureSuccessStatusCode();
 var devices = host.PairedDevices;
-if (devices.Count == 0 || !host.RevokePeer(devices.Single(p => p.Name == "Smoke").TokenHash)) throw new Exception("Cannot revoke paired device");
+if (!host.RevokePeer(devices.Single(p => p.Name == "Other smoke phone").TokenHash)) throw new Exception("Cannot revoke paired device");
 if ((await client.GetAsync("/api/items")).StatusCode != System.Net.HttpStatusCode.Unauthorized) throw new Exception("Revoked token still works");
-Console.WriteLine("Nerqo native encrypted LAN smoke: TLS, pairing, files, SHA256, receipts, range resume, cancellation, peer revocation PASSED");
+Console.WriteLine("Nerqo native encrypted LAN smoke: TLS, pairing, files, SHA256, receipts, range resume, cancellation, isolated authenticated disconnect and peer revocation PASSED");

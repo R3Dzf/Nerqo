@@ -67,7 +67,7 @@ private fun bytes(size: Long): String = when {
     shareText: String, manualIp: String, darkMode: Boolean,
     onShareText: (String) -> Unit, onManualIp: (String) -> Unit, onTheme: (Boolean) -> Unit,
     onScanQr: () -> Unit, onDiscover: () -> Unit, onSelectDevice: (Device) -> Unit,
-    onManualConnect: () -> Unit, onRefresh: () -> Unit, onFiles: () -> Unit, onFolder: () -> Unit,
+    onManualConnect: () -> Unit, onRefresh: () -> Unit, onDisconnect: () -> Unit, onFiles: () -> Unit, onFolder: () -> Unit,
     onSendText: () -> Unit, onPaste: () -> Unit, onEntry: (SharedEntry) -> Unit,
     onHotspot: () -> Unit, onWifiSettings: () -> Unit, onUpdates: () -> Unit
 ) {
@@ -183,8 +183,10 @@ private fun bytes(size: Long): String = when {
                     item { Panel {
                         Title(if (connected) deviceName ?: "Your computer" else "Meet your computer.")
                         Caption(if (connected) "Your pinned security identity is verified." else "Open Nerqo on Windows and scan the QR in Devices. Both devices should use the same Wi-Fi or hotspot.")
-                        Button(onClick = onScanQr, enabled = !busy, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp)) { Symbol(R.drawable.ic_qr); Spacer(Modifier.width(10.dp)); Text("Scan pairing QR") }
+                        Button(onClick = onScanQr, enabled = !busy, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp)) { Symbol(R.drawable.ic_qr); Spacer(Modifier.width(10.dp)); Text("Scan Wi-Fi / pairing QR") }
                         OutlinedButton(onClick = onDiscover, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("Find nearby computers") }
+                        if (paired) Caption("Disconnect ends device access, keeping Wi-Fi connected. Scan the pairing QR to reconnect; unfinished uploads may need restarting.")
+                        if (paired) OutlinedButton(onClick = onDisconnect, modifier = Modifier.fillMaxWidth()) { Text("Disconnect") }
                         if (paired) TextButton(onClick = { onRefresh(); page = 0 }, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("Open transfers") }
                     } }
                     if (nearby.isNotEmpty()) item { Text("Nearby", fontSize = 20.sp, fontWeight = FontWeight.SemiBold) }
@@ -219,7 +221,13 @@ private fun bytes(size: Long): String = when {
                         OutlinedButton(onClick = onWifiSettings, modifier = Modifier.fillMaxWidth()) { Text("Open Wi-Fi settings") }
                     } }
                     item { Panel {
-                        Title("No router? No problem.")
+                        Title("Connect without typing a password")
+                        Caption("On Windows: Devices → Laptop hotspot setup. Turn on Mobile hotspot, then scan the Wi-Fi QR shown by Windows. Approve the connection on your phone, return to Nerqo on Windows and scan its pairing QR.")
+                        OutlinedButton(onClick = onScanQr, enabled = !busy && transfer == null, modifier = Modifier.fillMaxWidth()) { Text("Scan laptop hotspot QR") }
+                        Caption("The Windows Wi-Fi QR is available on supported Windows 11 versions. If it is missing, join from Wi-Fi settings.")
+                    } }
+                    item { Panel {
+                        Title("Or use your phone as the hotspot")
                         Caption("Create an offline hotspot and join it on Windows. Android chooses the available band.")
                         OutlinedButton(onClick = onHotspot, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("Create offline hotspot") }
                         if (hotspotText.isNotBlank()) Text(hotspotText, color = MaterialTheme.colorScheme.primary, fontSize = 13.sp)
@@ -228,7 +236,7 @@ private fun bytes(size: Long): String = when {
                         Title("Keep Nerqo up to date")
                         Caption("Updates use the internet. Your local transfers work offline.")
                         Button(onClick = onUpdates, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("Check for app updates") }
-                        Caption("Nerqo 1.0.5 · Windows + Android")
+                        Caption("Nerqo 1.0.6 · Windows + Android")
                     } }
                 }
             }

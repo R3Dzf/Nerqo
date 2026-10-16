@@ -50,8 +50,13 @@ import java.util.concurrent.Executors
 class MainActivity : ComponentActivity() {
     private val qrLauncher = registerForActivityResult(ScanContract()) { result ->
         val content = result.contents
-        if (content != null) pairFromQr(content)
+        if (content != null) { if (content.startsWith("WIFI:")) joinWifiQr(content) else pairFromQr(content) }
     }
+    private var requestedWifi: android.net.Network? = null
+    private var wifiRequest: ConnectivityManager.NetworkCallback? = null
+    private var pendingWifiQr: String? = null
+    private var sessionGeneration = 0
+    private var polling = false
     private val executor = Executors.newSingleThreadExecutor()
     private var connected by mutableStateOf(false)
     private var darkMode by mutableStateOf(false)
@@ -125,6 +130,8 @@ class MainActivity : ComponentActivity() {
     private fun bindLocalNetwork() {
         try {
             val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+            if (hotspotReservation != null) { cm.bindProcessToNetwork(null); return }
+            requestedWifi?.let { cm.bindProcessToNetwork(it); return }
             val wifi = cm.allNetworks.firstOrNull { network ->
                 cm.getNetworkCapabilities(network)?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
             }
@@ -186,18 +193,51 @@ class MainActivity : ComponentActivity() {
             runOnUiThread { entries = fresh }
         }
     }
-    private fun refresh() {
+    private fun refresh(silent: Boolean = false) {
         val d = device ?: return
-        val access = token ?: run { showPair = true; return }
-        task {
+        val access = token ?: return
+        if (busy || polling) return
+        val generation = sessionGeneration
+        polling = true
+        if (!silent) busy = true
+        executor.execute {
             try {
+                bindLocalNetwork()
                 val fresh = NativeClient.list(d, access)
-                runOnUiThread { connected = true; entries = fresh; message = "Connected to ${d.name}" }
+                runOnUiThread {
+                    if (generation == sessionGeneration && !isDestroyed) {
+                        connected = true
+                        if (entries != fresh) entries = fresh
+                        if (!silent) message = "Connected to ${d.name}"
+                    }
+                }
             } catch (_: PairingExpiredException) {
-                val identity = NativeClient.previewIdentity(d)
                 prefs.edit().remove("token_${d.address}").apply()
-                runOnUiThread { connected = false; token = null; entries = emptyList(); previewFingerprint = identity; fingerprintConfirmed = false; showPair = true; message = "Device access expired or was revoked. Verify Windows again." }
+                runOnUiThread { if (generation == sessionGeneration && !isDestroyed) {
+                    connected = false; token = null; entries = emptyList(); showPair = false
+                    message = "Disconnected from Windows. Scan the pairing QR to reconnect."
+                } }
+            } catch (e: Exception) {
+                runOnUiThread { if (generation == sessionGeneration && !isDestroyed) {
+                    connected = false
+                    if (!silent) message = e.message ?: "Computer unavailable"
+                } }
+            } finally {
+                runOnUiThread { polling = false; if (!silent) busy = false }
             }
+        }
+    }
+    private fun disconnect() {
+        val d = device ?: return
+        val access = token ?: return
+        sessionGeneration++
+        transferControl?.interrupt(TransferStop.PAUSE, closeAsync = true)
+        connected = false; token = null; entries = emptyList(); showPair = false
+        prefs.edit().remove("token_${d.address}").apply()
+        message = "Disconnected. Any unfinished transfer is saved. Wi-Fi stays connected."
+        executor.execute {
+            // Best effort server revocation; local disconnect always succeeds, even offline.
+            runCatching { bindLocalNetwork(); NativeClient.disconnect(d, access) }
         }
     }
     private fun sendText() {
@@ -368,11 +408,74 @@ class MainActivity : ComponentActivity() {
         } catch (_: Exception) { false }
     }
     private fun scanPairQr() {
-        if (pendingTransfer != null) { message = "Resume or cancel the transfer before pairing another computer"; return }
+        if (busy) { message = "Pause the current transfer before scanning a QR"; return }
         val options = ScanOptions().setDesiredBarcodeFormats(ScanOptions.QR_CODE)
-            .setPrompt("Scan the QR inside Nerqo on your Windows computer")
-            .setBeepEnabled(false).setOrientationLocked(false)
+            .setPrompt("Scan a Windows Wi-Fi QR or the Nerqo pairing QR")
+            .setBeepEnabled(false).setCaptureActivity(PortraitCaptureActivity::class.java).setOrientationLocked(true)
         qrLauncher.launch(options)
+    }
+    private fun joinWifiQr(raw: String) {
+        if (Build.VERSION.SDK_INT < 29) {
+            message = "Open Wi-Fi settings to join the laptop hotspot, then scan its Nerqo QR."
+            startActivity(Intent(Settings.ACTION_WIFI_SETTINGS)); return
+        }
+        if (pendingTransfer != null || busy) { message = "Pause and finish or cancel the saved transfer before changing Wi-Fi"; return }
+        val permission = if (Build.VERSION.SDK_INT >= 33) Manifest.permission.NEARBY_WIFI_DEVICES else Manifest.permission.ACCESS_FINE_LOCATION
+        if (checkSelfPermission(permission) != PackageManager.PERMISSION_GRANTED) {
+            pendingWifiQr = raw
+            requestPermissions(arrayOf(permission), 481); return
+        }
+        if (raw.length > 2048) { message = "Wi-Fi QR is too long"; return }
+        val parsed = com.google.zxing.client.result.WifiResultParser().parse(
+            com.google.zxing.Result(raw, null, null, com.google.zxing.BarcodeFormat.QR_CODE))
+        if (parsed == null || parsed.ssid.isNullOrBlank() || parsed.ssid.toByteArray().size > 32) {
+            message = "Invalid Wi-Fi QR"; return
+        }
+        val auth = parsed.networkEncryption?.uppercase() ?: "NOPASS"
+        if (auth !in listOf("WPA", "WPA2", "WPA3", "SAE")) {
+            message = "Use a WPA2/WPA3 secured hotspot. This QR cannot be joined here."; return
+        }
+        AlertDialog.Builder(this).setTitle("Connect to laptop hotspot?")
+            .setMessage("Join ${parsed.ssid}? Android will ask you to approve the Wi-Fi connection. Afterwards scan the Nerqo pairing QR.")
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Connect") { _, _ ->
+                try {
+                    val builder = android.net.wifi.WifiNetworkSpecifier.Builder().setSsid(parsed.ssid).setIsHiddenSsid(parsed.isHidden)
+                    if (auth == "WPA3" || auth == "SAE") builder.setWpa3Passphrase(parsed.password ?: "")
+                    else builder.setWpa2Passphrase(parsed.password ?: "")
+                    val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+                    wifiRequest?.let { cm.unregisterNetworkCallback(it) }
+                    requestedWifi = null
+                    val callback = object : ConnectivityManager.NetworkCallback() {
+                        override fun onAvailable(network: android.net.Network) {
+                            requestedWifi = network; cm.bindProcessToNetwork(network)
+                            runOnUiThread { if (!isDestroyed) message = "Hotspot joined. Now scan the Nerqo pairing QR on Windows." }
+                        }
+                        override fun onUnavailable() {
+                            runOnUiThread { if (!isDestroyed) message = "Wi-Fi connection was declined or unavailable. Retry or use Wi-Fi settings." }
+                        }
+                        override fun onLost(network: android.net.Network) {
+                            if (requestedWifi == network) {
+                                requestedWifi = null; cm.bindProcessToNetwork(null)
+                                runOnUiThread { if (!isDestroyed) { connected = false; message = "Hotspot connection lost. Rejoin the network." } }
+                            }
+                        }
+                    }
+                    wifiRequest = callback
+                    val request = android.net.NetworkRequest.Builder().addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
+                        .removeCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET).setNetworkSpecifier(builder.build()).build()
+                    cm.requestNetwork(request, callback)
+                    message = "Approve Android's Wi-Fi connection request."
+                } catch (_: Exception) { message = "Cannot join this hotspot automatically. Use Wi-Fi settings." }
+            }.show()
+    }
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == 481) {
+            val raw = pendingWifiQr; pendingWifiQr = null
+            if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED && raw != null) joinWifiQr(raw)
+            else message = "Wi-Fi permission was declined. You can connect from Wi-Fi settings."
+        }
     }
     private fun pairFromQr(raw: String) {
         if (raw.length > 2048) { message = "QR code is too long"; return }
@@ -390,6 +493,10 @@ class MainActivity : ComponentActivity() {
             if (isPrivateIPv4(ip)) Device(name, ip) else null
         }.distinctBy { it.address }
         if (candidates.isEmpty()) { message = "No local Windows address in QR"; return }
+        val saved = pendingTransfer
+        if (saved != null && (saved.fingerprint != fp || candidates.none { it.address == saved.host && it.port == saved.port })) {
+            message = "This saved transfer belongs to another computer or address. Cancel it before switching devices."; return
+        }
         task {
             var lastFailure: Exception? = null
             for (candidate in candidates) {
@@ -471,6 +578,8 @@ class MainActivity : ComponentActivity() {
         transferControl?.interrupt(TransferStop.PAUSE, closeAsync = true)
         hotspotReservation?.close()
         (getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager).bindProcessToNetwork(null)
+        pendingWifiQr = null
+        wifiRequest?.let { runCatching { (getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager).unregisterNetworkCallback(it) } }
         executor.shutdownNow()
         super.onDestroy()
     }
@@ -498,7 +607,7 @@ class MainActivity : ComponentActivity() {
                 delay(7000)
                 // A refresh also owns the serial worker and disables Resume.
                 // Keep recovery controls available while a saved job exists.
-                if (device != null && token != null && !busy && pendingTransfer == null) refresh()
+                if (device != null && token != null && !busy && pendingTransfer == null) refresh(silent = true)
             }
         }
         NerqoTheme(darkMode) {
@@ -512,7 +621,7 @@ class MainActivity : ComponentActivity() {
                 onShareText = { shareText = it }, onManualIp = { manualIp = it },
                 onTheme = { darkMode = it; prefs.edit().putBoolean("dark_mode", it).apply() },
                 onScanQr = ::scanPairQr, onDiscover = ::scan, onSelectDevice = ::select,
-                onManualConnect = ::manualConnect, onRefresh = ::refresh,
+                onManualConnect = ::manualConnect, onRefresh = { refresh() }, onDisconnect = ::disconnect,
                 onFiles = { picker.launch(arrayOf("*/*")) }, onFolder = { folderPicker.launch(null) },
                 onSendText = ::sendText, onPaste = {
                     val clipboard = getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager

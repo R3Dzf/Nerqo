@@ -293,7 +293,7 @@ public sealed class LanHost : IAsyncDisposable
             catch (BadHttpRequestException e) { if (!ctx.Response.HasStarted) { ctx.Response.StatusCode = e.StatusCode; await ctx.Response.WriteAsJsonAsync(new { error = e.Message }); } }
             catch (JsonException) { if (!ctx.Response.HasStarted) { ctx.Response.StatusCode = 400; await ctx.Response.WriteAsJsonAsync(new { error = "Invalid JSON" }); } }
         });
-        app.MapGet("/api/status", (HttpContext ctx) => Results.Json(new { name = Environment.MachineName, authorized = Authorize(ctx) != null, port = Port, version = "1.0.5", transferProtocol = 2, band = WifiInspector.GetBand() }));
+        app.MapGet("/api/status", (HttpContext ctx) => Results.Json(new { name = Environment.MachineName, authorized = Authorize(ctx) != null, port = Port, version = "1.0.6", transferProtocol = 2, band = WifiInspector.GetBand() }));
         app.MapPost("/api/pair", async (HttpContext ctx) =>
         {
             string ip = ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown";
@@ -307,6 +307,12 @@ public sealed class LanHost : IAsyncDisposable
             lock (gate) { state.Peers[Digest(token)] = new PeerRecord { Name = name, Expires = DateTimeOffset.UtcNow.AddDays(30) }; Save(); }
             attempts.TryRemove(ip, out _);
             return Results.Json(new { ok = true, token });
+        });
+        app.MapPost("/api/disconnect", (HttpContext ctx) =>
+        {
+            if (Authorize(ctx) == null) return Unauthorized();
+            RevokePeer(Digest(Bearer(ctx)!));
+            return Results.Json(new { disconnected = true });
         });
         app.MapGet("/api/items", (HttpContext ctx) => Authorize(ctx) == null ? Unauthorized() : Results.Json(new { items = Items }));
         app.MapPost("/api/items", async (HttpContext ctx) =>

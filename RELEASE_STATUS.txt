@@ -1,10 +1,12 @@
-Nerqo native 1.0.5 Stable channel
+Nerqo native 1.0.6 Stable channel
 
-Native Windows WPF and Android Compose apps. 1.0.5 corrects service-scoped Firewall false positives, coordinates a single
-Windows instance and provides actual receiver errors with retry/copy diagnostics. Permanent Android signing, native installer updates and compatible delta
-updates continue. Release publication requires all automated gates to pass.
+Windows WPF and Android Compose. This update adds portrait QR scanning,
+consent-based Wi-Fi QR joining, a Windows hotspot settings shortcut,
+Disconnect on both devices and quiet Android background refresh.
+Publication requires all build, transport, UI and signing gates to pass.
 
-LAN/Wi-Fi and normal hotspot transfers are implemented. Native Wi-Fi Direct and
-Bluetooth are not implemented. Physical-device acceptance and Windows trusted
-Authenticode publisher signing remain outstanding. See docs/NATIVE_ROADMAP.md
-and docs/releases/v1.0.5.md for the supported scope and validation limits.
+Windows hotspot creation is controlled by Windows settings. Its Wi-Fi QR
+requires a supporting Windows 11 version. Native Wi-Fi Direct/Bluetooth,
+in-app frequency selection and separate transfer history remain pending.
+Physical-device acceptance and Windows Authenticode signing remain outstanding.
+See docs/releases/v1.0.6.md and docs/NATIVE_ROADMAP.md.
