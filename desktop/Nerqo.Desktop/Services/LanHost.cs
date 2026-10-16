@@ -89,7 +89,7 @@ public sealed class LanHost : IAsyncDisposable
     private readonly Dictionary<string, LiveTransfer> live = new();
     private readonly HashSet<string> stopped = new();
     private readonly Dictionary<string, (long Done, long Ticks, double Rate)> incomingRates = new();
-    public List<LiveTransfer> Transfers { get { lock (gate) return state.Uploads.Values.Select(x => new LiveTransfer(x.Id, x.Name, "Receiving", stopped.Contains(x.Id) ? "Paused on Windows" : "Ready / checkpoint saved", x.Offset, x.Size, incomingRates.GetValueOrDefault(x.Id).Rate)).Concat(live.Values).Take(200).ToList(); } }
+    public List<LiveTransfer> Transfers { get { lock (gate) return state.Uploads.Values.Select(x => new LiveTransfer(x.Id, x.Name, "Receiving", stopped.Contains(x.Id) ? "Paused on Windows" : "Ready / checkpoint saved", x.Offset, x.Size, (System.Diagnostics.Stopwatch.GetTimestamp() - incomingRates.GetValueOrDefault(x.Id).Ticks) < System.Diagnostics.Stopwatch.Frequency * 5L ? incomingRates.GetValueOrDefault(x.Id).Rate : 0)).Concat(live.Values).Take(200).ToList(); } }
     internal void StreamProgress(string id, long done, double rate, string status)
     {
         lock (gate) if (live.TryGetValue(id, out var entry)) live[id] = entry with { Done = done, Rate = rate, Status = stopped.Contains(id) ? "Paused on Windows" : status };

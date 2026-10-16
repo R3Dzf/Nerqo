@@ -80,6 +80,7 @@ adb('shell', 'wm', 'dismiss-keyguard')
 # Instrumentation owns the target process. Relaunch from a stopped process so
 # the UI recovery check also verifies loading the persisted transfer job.
 adb('shell', 'am', 'force-stop', 'com.r3dzf.nerqo')
+adb('shell', 'pm', 'grant', 'com.r3dzf.nerqo', 'android.permission.POST_NOTIFICATIONS')
 (OUTPUT / 'launch.txt').write_text(adb('shell', 'am', 'start', '-W', '-n', 'com.r3dzf.nerqo/.MainActivity'))
 time.sleep(5)
 capture('Launch')
@@ -123,7 +124,7 @@ else:
     failure('Native UI transfer did not complete after resume', tree)
 capture('Transfers')
 received = adb('exec-out', 'run-as', 'com.r3dzf.nerqo', 'cat', 'cache/transport-fixtures/ui-resume.bin', binary=True)
-expected = bytes(range(256)) * (32 * 4096) + b'ui'
+expected = bytes(range(256)) * (64 * 4096) + b'ui'
 if hashlib.sha256(received).digest() != hashlib.sha256(expected).digest():
     raise RuntimeError('UI-resumed document does not match the TLS source')
 (OUTPUT / 'transfer-verification.txt').write_text('PASS: restored download; native Pause/Resume; screen-off foreground service kept writing; final size and SHA-256 match source.\n')

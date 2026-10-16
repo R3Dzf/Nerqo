@@ -9,7 +9,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit, parse_qs
 
 DATA = bytes(range(256)) * (9 * 4096) + b'nerqo'
-UI_DATA = bytes(range(256)) * (32 * 4096) + b'ui'
+UI_DATA = bytes(range(256)) * (64 * 4096) + b'ui'
 SHA = hashlib.sha256(DATA).hexdigest()
 UI_SHA = hashlib.sha256(UI_DATA).hexdigest()
 SINGLE, FOLDER, UI = '1' * 32, '2' * 32, '3' * 32

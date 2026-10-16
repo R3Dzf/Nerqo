@@ -276,7 +276,12 @@ class MainActivity : ComponentActivity() {
             .setNegativeButton("Keep", null).setPositiveButton("Forget") { _, _ ->
                 if (pendingTransfer != null || busy) { message = "Cancel the saved transfer before forgetting this computer"; return@setPositiveButton }
                 val old = prefs.getString("token_${current.address}", null)
-                prefs.edit().remove("token_${current.address}").remove("saved_token").remove("saved_identity").remove("host").apply()
+                val identity = prefs.getString("cert_${current.address}:${current.port}", null)
+                val edit = prefs.edit().remove("token_${current.address}").remove("saved_token").remove("saved_identity").remove("host")
+                prefs.all.filter { it.key.startsWith("cert_") && it.value == identity }.keys.forEach { key ->
+                    edit.remove(key).remove("token_" + key.removePrefix("cert_").substringBefore(':'))
+                }
+                edit.apply()
                 token = null; connected = false; device = null; entries = emptyList()
                 if (old != null) executor.execute { runCatching { NativeClient.forget(current, old) } }
                 message = "Computer forgotten. Pair again to restore access."

@@ -51,6 +51,15 @@ class NativeTransportTest {
         assertEquals("Completed", loaded.single().status)
         assertEquals("Received", loaded.single().direction)
     }
+    @Test fun test00CheckpointScopeSurvivesMovingToNewAddress() {
+        val original = TransferJob(kind = "downloadFile", title = "address change", host = "192.168.10.2", port = 44888, deviceName = device.name, fingerprint = fingerprint)
+        val moved = original.copy(host = "192.168.20.2")
+        val restored = TransferJob.decode(moved.json().toString())!!
+        assertEquals("192.168.20.2", restored.host)
+        assertEquals(original.host, restored.checkpointHost)
+        val control = TransferControl().apply { endpointScope = "https://${restored.checkpointHost}:${restored.checkpointPort}" }
+        control.run { assertEquals("https://192.168.10.2:44888", NativeClient.checkpointEndpoint(Device(device.name, restored.host))) }
+    }
     @Test fun test00ForegroundServiceIsPrivateDataSync() {
         val info = context.packageManager.getServiceInfo(android.content.ComponentName(context, TransferService::class.java), 0)
         assertFalse(info.exported)
@@ -138,7 +147,7 @@ class NativeTransportTest {
         }
     }
     @Test fun test99LeaveRealPausedTransferForUiResumeTest() {
-        val content = ByteArray(32 * 1024 * 1024) { it.toByte() } + "ui".toByteArray()
+        val content = ByteArray(64 * 1024 * 1024) { it.toByte() } + "ui".toByteArray()
         val entry = SharedEntry("3".repeat(32), "file", device.name, "Native-resume-fixture.bin", content.size.toLong(), hash(content))
         val target = uri("ui-resume.bin")
         val job = TransferJob(kind = "downloadFile", title = "Save native resume fixture", host = device.address,

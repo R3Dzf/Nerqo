@@ -479,6 +479,50 @@ if (OperatingSystem.IsWindows()) {
     try { using var writer = new FileStream(fastPath, FileMode.Open, FileAccess.Write); } catch (IOException) { blocked = true; }
     if (!blocked) throw new Exception("Original can change while fast share is published");
 }
+// 700 MiB streamed over real TLS sockets with a Windows-side pause and byte-range resume.
+// This validates memory-bounded transport, not physical Wi-Fi throughput.
+string largePath = Path.Combine(host.ReceivedDirectory, "Large-" + Guid.NewGuid().ToString("N") + ".bin");
+byte[] largeBlock = RandomNumberGenerator.GetBytes(1024 * 1024);
+using var largeExpected = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+await using (var target = File.Create(largePath)) {
+    for (int block = 0; block < 700; block++) { await target.WriteAsync(largeBlock); largeExpected.AppendData(largeBlock); }
+}
+string expectedLargeHash = Convert.ToHexString(largeExpected.GetHashAndReset()).ToLowerInvariant();
+await host.ShareFileDirectAsync(largePath);
+var largeShare = host.Items.Single(x => x.Content == Path.GetFileName(largePath));
+if (largeShare.Sha256 != expectedLargeHash) throw new Exception("Large-file preparation hash differs");
+using var largeClient = new HttpClient(handler, disposeHandler: false) { BaseAddress = client.BaseAddress, Timeout = TimeSpan.FromMinutes(2) };
+largeClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+using var receivedHash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+long largeDone = 0; bool pausedLarge = false;
+using (var response = await largeClient.GetAsync($"/api/files/{largeShare.Id}", HttpCompletionOption.ResponseHeadersRead)) {
+    response.EnsureSuccessStatusCode();
+    await using var stream = await response.Content.ReadAsStreamAsync();
+    byte[] buffer = new byte[1024 * 1024];
+    try {
+        while (true) {
+            int count = await stream.ReadAsync(buffer); if (count == 0) break;
+            receivedHash.AppendData(buffer, 0, count); largeDone += count;
+            if (!pausedLarge && largeDone >= 8 * 1024 * 1024) {
+                var active = host.Transfers.Single(x => x.Name == largeShare.Content && x.Direction == "Sending");
+                host.ControlTransfer(active.Id, "pause"); pausedLarge = true;
+            }
+        }
+    } catch (IOException) { }
+}
+if (!pausedLarge || largeDone >= largeShare.Size) throw new Exception("Windows Pause failed to interrupt a large active stream");
+var pausedSend = host.Transfers.Single(x => x.Name == largeShare.Content && x.Direction == "Sending");
+host.ControlTransfer(pausedSend.Id, "resume");
+using (var request = new HttpRequestMessage(HttpMethod.Get, $"/api/files/{largeShare.Id}")) {
+    request.Headers.Range = new System.Net.Http.Headers.RangeHeaderValue(largeDone, null);
+    using var response = await largeClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
+    if (response.StatusCode != System.Net.HttpStatusCode.PartialContent || response.Content.Headers.ContentRange?.From != largeDone) throw new Exception("Large-file resume ignored the received offset");
+    await using var stream = await response.Content.ReadAsStreamAsync(); byte[] buffer = new byte[1024 * 1024];
+    while (true) { int count = await stream.ReadAsync(buffer); if (count == 0) break; receivedHash.AppendData(buffer, 0, count); largeDone += count; }
+}
+if (largeDone != largeShare.Size || Convert.ToHexString(receivedHash.GetHashAndReset()).ToLowerInvariant() != expectedLargeHash) throw new Exception("700 MiB paused/resumed TLS stream checksum mismatch");
+Console.WriteLine("PASS: 700 MiB TLS socket stream; Windows Pause; range Resume; final SHA-256; bounded buffers.");
+
 using (var anonymous = new HttpClient(handler, disposeHandler: false) { BaseAddress = client.BaseAddress })
     if ((await anonymous.PostAsJsonAsync("/api/disconnect", new {})).StatusCode != System.Net.HttpStatusCode.Unauthorized)
         throw new Exception("Unauthenticated disconnect was accepted");
@@ -489,7 +533,7 @@ string anotherToken = (await anotherPair.Content.ReadFromJsonAsync<JsonElement>(
 if ((int)(await client.GetAsync("/api/items")).StatusCode != 423) throw new Exception("Disconnected client still has access");
 (await client.PostAsJsonAsync("/api/reconnect", new {})).EnsureSuccessStatusCode();
 (await client.GetAsync("/api/items")).EnsureSuccessStatusCode();
-var suspended = host.PairedDevices.Single(x => x.Name != "Other smoke phone");
+var suspended = host.PairedDevices.Single(x => x.TokenHash == Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(token))).ToLowerInvariant());
 if (!host.SetPeerSuspended(suspended.TokenHash, true)) throw new Exception("Windows disconnect failed");
 if ((int)(await client.GetAsync("/api/items")).StatusCode != 423) throw new Exception("Windows disconnect ignored");
 if (!host.SetPeerSuspended(suspended.TokenHash, false)) throw new Exception("Windows reconnect failed");

@@ -61,6 +61,9 @@ internal object LocalNetwork {
         stopHotspot()
         val callback = object : WifiManager.LocalOnlyHotspotCallback() {
             override fun onStarted(value: WifiManager.LocalOnlyHotspotReservation) {
+                if (Build.VERSION.SDK_INT >= 30 && (value.softApConfiguration.securityType == SoftApConfiguration.SECURITY_TYPE_OPEN || value.softApConfiguration.passphrase.isNullOrBlank())) {
+                    value.close(); message("Android did not provide a secured hotspot. Use Auto or system hotspot settings."); return
+                }
                 reservation = value; cm.bindProcessToNetwork(null)
                 @Suppress("DEPRECATION")
                 val ssid = if (Build.VERSION.SDK_INT >= 30) value.softApConfiguration.ssid else value.wifiConfiguration?.SSID

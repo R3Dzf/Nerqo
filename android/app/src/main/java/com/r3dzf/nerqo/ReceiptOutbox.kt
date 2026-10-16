@@ -18,7 +18,13 @@ internal object ReceiptOutbox {
     @Synchronized fun flush(context: Context) {
         val outbox = context.getSharedPreferences("nerqo_receipts", Context.MODE_PRIVATE)
         val prefs = context.getSharedPreferences("nerqo_native", Context.MODE_PRIVATE)
-        for ((key, value) in outbox.all.entries.take(4)) {
+        val pending = outbox.all.entries.filter { it.value is String }.sortedBy { it.key }
+        if (pending.isEmpty()) return
+        val cursor = outbox.getInt("cursor", 0).coerceAtLeast(0) % pending.size
+        val attempts = minOf(4, pending.size)
+        outbox.edit().putInt("cursor", (cursor + attempts) % pending.size).apply()
+        for (index in 0 until attempts) {
+            val (key, value) = pending[(cursor + index) % pending.size]
             val job = (value as? String)?.let { TransferJob.decode(it) } ?: continue
             val entry = job.entry ?: continue
             val host = if (prefs.getString("saved_identity", null) == job.fingerprint) prefs.getString("host", job.host) ?: job.host else job.host
@@ -30,6 +36,9 @@ internal object ReceiptOutbox {
                 NativeClient.trustIdentity(device, job.fingerprint)
                 NativeClient.confirmReception(device, token, entry, job.id)
                 check(outbox.edit().remove(key).commit())
+            } catch (error: NativeHttpException) {
+                // A deleted or expired share cannot accept a receipt. Keep local History; let later receipts progress.
+                if (error.httpStatus in listOf(400, 404, 410)) outbox.edit().remove(key).commit()
             } catch (_: Exception) { /* Retry on the next successful connection. Idempotent on Windows. */ }
         }
     }
