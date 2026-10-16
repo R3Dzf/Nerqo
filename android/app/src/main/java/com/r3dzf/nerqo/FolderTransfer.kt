@@ -38,9 +38,10 @@ internal object FolderTransfer {
             NativeClient.beginFolder(device, token, rootName)
         } else {
             try { NativeClient.beginFolder(device, token, rootName, previous) }
-            catch (e: IOException) {
-                // A revoked or expired folder session requires a new destination,
-                // rather than writing into an unrelated folder.
+            catch (e: NativeHttpException) {
+                // Recreate the folder only after an explicit server-side 409.
+                // A Wi-Fi timeout should never silently create duplicate folders.
+                if (e.httpStatus != 409) throw e
                 NativeClient.beginFolder(device, token, rootName)
             }
         }

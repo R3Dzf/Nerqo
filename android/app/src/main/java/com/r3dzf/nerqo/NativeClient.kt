@@ -34,6 +34,7 @@ internal data class SharedEntry(
 )
 
 internal class PairingExpiredException : IOException("Device pairing expired or was revoked")
+internal class NativeHttpException(val httpStatus: Int, details: String) : IOException(details)
 
 internal object NativeClient {
     private const val MAX_CHUNK = 4 * 1024 * 1024
@@ -138,7 +139,7 @@ internal object NativeClient {
             if (status == 401) throw PairingExpiredException()
             if (status !in 200..299) {
                 val message = conn.errorStream?.bufferedReader()?.use { it.readText().take(256) } ?: "HTTP $status"
-                throw IOException("Nerqo: $message")
+                throw NativeHttpException(status, "Nerqo HTTP $status: $message")
             }
             return JSONObject(conn.inputStream.bufferedReader().use { it.readText() })
         } finally { conn.disconnect() }
@@ -214,9 +215,16 @@ internal object NativeClient {
         if (resume != null) body.put("resumeId", resume)
         var transfer: JSONObject
         try { transfer = postJson(device.endpoint, "/api/transfers/begin", body, token) }
-        catch (_: IOException) {
+        catch (e: NativeHttpException) {
+            // Retry from zero only if the server definitively rejects a stale
+            // resume ID. A timeout does not prove the original upload is gone.
+            if (e.httpStatus != 409) throw e
             prefs.edit().remove(key).apply()
-            transfer = postJson(device.endpoint, "/api/transfers/begin", JSONObject().put("name", name).put("size", size), token)
+            val fresh = JSONObject().put("name", name).put("size", size)
+            if (folderId != null && relativePath != null) {
+                fresh.put("folderId", folderId).put("relativePath", relativePath)
+            }
+            transfer = postJson(device.endpoint, "/api/transfers/begin", fresh, token)
         }
         if (transfer.optBoolean("complete", false)) {
             val expected = transfer.getString("sha256")
