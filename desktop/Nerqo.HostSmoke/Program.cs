@@ -214,6 +214,13 @@ if (!File.Exists(directFile) || !folderPayload.SequenceEqual(await File.ReadAllB
     throw new Exception("Direct folder file not found with original relative path");
 if (!Directory.Exists(Path.Combine(directParent, "nested", "empty")))
     throw new Exception("Empty nested directory lost");
+var repeated = await client.PostAsJsonAsync("/api/transfers/begin",
+    new { name = "photo.txt", size = folderPayload.Length, folderId, relativePath = "nested/photo.txt" });
+repeated.EnsureSuccessStatusCode();
+var repeatedInfo = await repeated.Content.ReadFromJsonAsync<JsonElement>();
+if (!repeatedInfo.GetProperty("complete").GetBoolean()
+    || repeatedInfo.GetProperty("sha256").GetString() != Convert.ToHexString(SHA256.HashData(folderPayload)).ToLowerInvariant())
+    throw new Exception("Already-transferred folder file was not recognized");
 var otherStart = await client.PostAsJsonAsync("/api/folders/begin", new { name = "AnotherFolder" });
 otherStart.EnsureSuccessStatusCode();
 string otherId = (await otherStart.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetString()!;

@@ -26,6 +26,7 @@ public sealed class TransferItem
     public string Content { get; set; } = "";
     public long Size { get; set; }
     public string Sha256 { get; set; } = "";
+    public string FolderId { get; set; } = "";
     public DateTimeOffset Created { get; set; } = DateTimeOffset.UtcNow;
 }
 internal sealed class UploadRecord
@@ -367,6 +368,13 @@ public sealed class LanHost : IAsyncDisposable
                 if (folderId.Length > 0
                     && (!state.Folders.TryGetValue(folderId, out var folder) || folder.Owner != owner))
                     return Results.StatusCode(403);
+                if (folderId.Length > 0)
+                {
+                    var completed = state.Items.FirstOrDefault(i => i.FolderId == folderId
+                        && i.Content == relative && i.Kind == "file" && i.Size == size);
+                    if (completed != null && File.Exists(Path.Combine(StorageDirectory, completed.Id + ".bin")))
+                        return Results.Json(new { complete = true, sha256 = completed.Sha256, size });
+                }
                 if (resume != null && state.Uploads.TryGetValue(resume, out var existing))
                 {
                     if (existing.Owner != owner || existing.Name != name || existing.Size != size || existing.FolderId != folderId || existing.RelativePath != relative) return Results.Conflict();
@@ -432,7 +440,7 @@ public sealed class LanHost : IAsyncDisposable
                 string hash; using (var read = File.OpenRead(finalPath)) hash = Hex(SHA256.HashData(read));
                 var item = new TransferItem { Id = id, Kind = "file", Sender = peer.Name,
                     Content = t.FolderId.Length > 0 ? t.RelativePath : t.Name,
-                    Size = t.Size, Sha256 = hash };
+                    FolderId = t.FolderId, Size = t.Size, Sha256 = hash };
                 state.Items.Add(item); state.Uploads.Remove(id); Save();
                 return Results.Json(new { id, name = t.Name, size = t.Size, sha256 = hash });
             }
