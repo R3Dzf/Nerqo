@@ -19,6 +19,7 @@ class NativeSigningTests(unittest.TestCase):
         self.assertIn("Choose folder to share (ZIP)", xaml)
         self.assertIn("Send folder directly", android)
         self.assertIn("FolderTransfer.send", android)
+        self.assertIn("FolderReceiver.receive", android)
         direct = (ROOT / "android/app/src/main/java/com/r3dzf/nerqo/FolderTransfer.kt").read_text()
         native = (ROOT / "android/app/src/main/java/com/r3dzf/nerqo/NativeClient.kt").read_text()
         host = (ROOT / "desktop/Nerqo.Desktop/Services/LanHost.cs").read_text()

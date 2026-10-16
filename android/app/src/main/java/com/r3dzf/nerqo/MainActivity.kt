@@ -67,6 +67,7 @@ class MainActivity : ComponentActivity() {
     private var hotspotText by mutableStateOf("")
     private var hotspotReservation: WifiManager.LocalOnlyHotspotReservation? = null
     private var pendingDownload: SharedEntry? = null
+    private var pendingFolderDownload: SharedEntry? = null
     private val prefs by lazy { getSharedPreferences("nerqo_native", MODE_PRIVATE) }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -238,6 +239,19 @@ class MainActivity : ComponentActivity() {
             runOnUiThread { progress = 0f; message = "Saved ${entry.content}" }
         }
     }
+    private fun receiveFolder(item: SharedEntry, destination: Uri) {
+        val d = device ?: return
+        val access = token ?: return
+        task {
+            FolderReceiver.receive(this, d, access, item.id, destination, item.content) { n, path, done, total ->
+                runOnUiThread {
+                    progress = if (total <= 0L) 0f else (done.toFloat() / total).coerceIn(0f, 1f)
+                    message = "Saving folder: " + n + " files · " + path
+                }
+            }
+            runOnUiThread { progress = 0f; message = "Folder saved successfully" }
+        }
+    }
     private fun isPrivateIPv4(raw: String): Boolean {
         return try {
             if (!raw.matches(Regex("[0-9.]{7,15}"))) return false
@@ -360,6 +374,11 @@ class MainActivity : ComponentActivity() {
         val folderPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
             if (uri != null) submitFolder(uri)
         }
+        val folderReceiverPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+            val entry = pendingFolderDownload
+            pendingFolderDownload = null
+            if (uri != null && entry != null) receiveFolder(entry, uri)
+        }
         val writer = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
             val item = pendingDownload
             if (uri != null && item != null) download(item, uri)
@@ -444,8 +463,12 @@ class MainActivity : ComponentActivity() {
                                     Column(Modifier.weight(1f)) { Text(item.content, maxLines = 2, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.SemiBold); Text("${item.kind}  ·  ${item.sender}", color = muted, fontSize = 12.sp) }
                                     TextButton(onClick = {
                                         if (item.kind == "file") { pendingDownload = item; writer.launch(item.content) }
+                                        else if (item.kind == "folder") {
+                                            pendingFolderDownload = item
+                                            folderReceiverPicker.launch(null)
+                                        }
                                         else { val clip = android.content.ClipData.newPlainText("Nerqo", item.content); (getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager).setPrimaryClip(clip); Toast.makeText(this@MainActivity, "Copied", Toast.LENGTH_SHORT).show() }
-                                    }) { Text(if (item.kind == "file") "Save" else "Copy") }
+                                    }) { Text(if (item.kind == "file") "Save" else if (item.kind == "folder") "Save folder" else "Copy") }
                                 }
                             }
                         }

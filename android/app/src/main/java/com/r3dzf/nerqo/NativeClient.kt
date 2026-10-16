@@ -285,6 +285,43 @@ internal object NativeClient {
             JSONObject(), token)
         if (allowResume) prefs.edit().remove(key).apply()
     }
+    fun outgoingFolderManifest(device: Device, token: String, id: String): JSONObject {
+        require(id.matches(Regex("[0-9a-f]{32}")))
+        return response(connect(device.endpoint + "/api/outgoing-folders/" + id + "/manifest", "GET", token))
+    }
+
+    fun saveOutgoingFolderFile(context: Context, device: Device, token: String, id: String,
+                               relative: String, size: Long, expectedSha: String, target: Uri,
+                               progress: (Long, Long) -> Unit) {
+        require(id.matches(Regex("[0-9a-f]{32}")))
+        if (!expectedSha.matches(Regex("[0-9a-f]{64}")) || size < 0) throw IOException("Invalid folder member metadata")
+        val encoded = java.net.URLEncoder.encode(relative, "UTF-8")
+        val conn = connect(device.endpoint + "/api/outgoing-folders/" + id + "/file?path=" + encoded,
+            "GET", token)
+        try {
+            if (conn.responseCode != 200) throw IOException("Folder file unavailable: HTTP " + conn.responseCode)
+            val digest = MessageDigest.getInstance("SHA-256")
+            var length = 0L
+            context.contentResolver.openOutputStream(target, "w")?.use { output ->
+                conn.inputStream.use { input ->
+                    val chunk = ByteArray(256 * 1024)
+                    while (true) {
+                        val count = input.read(chunk)
+                        if (count < 0) break
+                        length += count
+                        if (length > size) throw IOException("Unexpected oversized folder member")
+                        output.write(chunk, 0, count)
+                        digest.update(chunk, 0, count)
+                        progress(length, size)
+                    }
+                    output.flush()
+                }
+            } ?: throw IOException("Storage provider did not allow writing")
+            if (length != size || shaDigest(digest) != expectedSha)
+                throw IOException("Folder file checksum did not match; the source may have changed")
+        } finally { conn.disconnect() }
+    }
+
     fun download(context: Context, device: Device, token: String, item: SharedEntry, target: Uri, progress: (Long, Long) -> Unit) {
         val conn = connect(device.endpoint + "/api/files/${item.id}", "GET", token)
         try {
