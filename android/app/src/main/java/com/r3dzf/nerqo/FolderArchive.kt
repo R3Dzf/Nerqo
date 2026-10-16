@@ -25,7 +25,7 @@ object FolderArchive {
         return name
     }
 
-    fun stage(context: Context, tree: Uri): File {
+    fun stage(context: Context, tree: Uri, progress: (Int) -> Unit = {}): File {
         val root = DocumentFile.fromTreeUri(context, tree)
             ?: throw IOException("Could not open selected folder")
         if (!root.isDirectory) throw IOException("Select a folder, not a file")
@@ -42,6 +42,7 @@ object FolderArchive {
                 fun visit(dir: DocumentFile, prefix: String, depth: Int) {
                     if (depth > MAX_DEPTH) throw IOException("Folder is nested too deeply")
                     if (++entries > MAX_ENTRIES) throw IOException("Too many files or folders")
+                    progress(entries)
                     zip.putNextEntry(ZipEntry(prefix + "/"))
                     zip.closeEntry()
                     for (child in dir.listFiles()) {
@@ -50,6 +51,7 @@ object FolderArchive {
                             visit(child, path, depth + 1)
                         } else if (child.isFile) {
                             if (++entries > MAX_ENTRIES) throw IOException("Too many files or folders")
+                            progress(entries)
                             val declaredSize = child.length()
                             if (declaredSize < 0 || declaredSize > MAX_BYTES - totalBytes)
                                 throw IOException("Folder is larger than the 2 TB transfer limit")

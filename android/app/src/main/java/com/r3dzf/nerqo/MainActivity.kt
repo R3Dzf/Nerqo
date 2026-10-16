@@ -214,7 +214,9 @@ class MainActivity : ComponentActivity() {
         if (d == null || access == null) { message = "Pair with Windows first, then choose a folder"; return }
         task {
             runOnUiThread { message = "Preparing folder archive…" }
-            val archive = FolderArchive.stage(this, treeUri)
+            val archive = FolderArchive.stage(this, treeUri) { count ->
+                runOnUiThread { message = "Packing folder: " + count + " entries" }
+            }
             try {
                 NativeClient.sendFile(this, d, access, Uri.fromFile(archive), allowResume = false) { done, total ->
                     runOnUiThread {

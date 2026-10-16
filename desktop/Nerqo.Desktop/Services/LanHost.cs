@@ -348,7 +348,7 @@ public sealed class LanHost : IAsyncDisposable
     /// paths and empty directories. Reparse points are skipped to prevent the
     /// selected folder from escaping into unrelated filesystem locations.
     /// </summary>
-    public async Task ShareFolderAsync(string path, CancellationToken ct = default)
+    public async Task ShareFolderAsync(string path, IProgress<int>? progress = null, CancellationToken ct = default)
     {
         var directory = new DirectoryInfo(path);
         if (!directory.Exists || directory.Attributes.HasFlag(FileAttributes.ReparsePoint))
@@ -366,6 +366,7 @@ public sealed class LanHost : IAsyncDisposable
             if (depth > 64) throw new IOException("Folder nesting exceeds the safe limit of 64 levels.");
             if (++entries > 100000) throw new IOException("Folder contains too many items (limit: 100000).");
             zip.CreateEntry(prefix + "/", CompressionLevel.NoCompression);
+            progress?.Report(entries);
             foreach (var child in dir.EnumerateFileSystemInfos())
             {
                 ct.ThrowIfCancellationRequested();
@@ -382,6 +383,7 @@ public sealed class LanHost : IAsyncDisposable
                     if (++entries > 100000) throw new IOException("Folder has too many items.");
                     if (file.Length > MaxFile - totalBytes) throw new IOException("Folder is larger than the 2 TB transfer policy.");
                     totalBytes += file.Length;
+                    progress?.Report(entries);
                     var entry = zip.CreateEntry(relative, CompressionLevel.Fastest);
                     await using var source = new FileStream(file.FullName, FileMode.Open, FileAccess.Read,
                         FileShare.Read, 1024 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan);

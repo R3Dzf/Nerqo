@@ -138,7 +138,7 @@ public partial class MainWindow : Window
         try
         {
             FooterLabel.Text = "Preparing folder archive…";
-            await service.ShareFolderAsync(dialog.SelectedPath);
+            await service.ShareFolderAsync(dialog.SelectedPath, new Progress<int>(n => FooterLabel.Text = $"Packing folder: {n} entries"));
             FooterLabel.Text = "Folder ready on Android as a ZIP archive";
         }
         catch (Exception ex)
