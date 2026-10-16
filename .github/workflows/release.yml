@@ -14,7 +14,7 @@ permissions:
 
 concurrency:
   group: nerqo-stable-release
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   version:
@@ -40,6 +40,7 @@ jobs:
   windows-native:
     needs: version
     runs-on: windows-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -66,6 +67,7 @@ jobs:
           New-Item -ItemType Directory -Force dist/StableWindows
           Copy-Item dist/Installer/Nerqo-Windows-Setup.exe dist/StableWindows/Nerqo-Windows-Setup.exe
       - name: Build previous native installer and verify in-place upgrade
+        timeout-minutes: 5
         shell: pwsh
         run: |
           git fetch --depth 1 origin f512d40c7c4ca9809156202f970553af0f322652

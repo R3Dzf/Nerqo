@@ -32,6 +32,7 @@ def failure(message, tree=None):
 
 
 def tap(label, attr='text'):
+    tree = None
     for _ in range(12):
         try:
             adb('shell', 'uiautomator', 'dump', '/sdcard/nerqo-ui.xml')
@@ -54,7 +55,7 @@ def tap(label, attr='text'):
                     adb('shell', 'input', 'tap', str((bounds[0]+bounds[2])//2), str((bounds[1]+bounds[3])//2))
                     return
         time.sleep(1)
-    raise RuntimeError(f'Native UI element missing: {label}')
+    failure(f'Native UI element missing: {label}', tree)
 
 
 def resume(must_be_active=False):
@@ -76,8 +77,12 @@ def resume(must_be_active=False):
 
 adb('shell', 'input', 'keyevent', 'KEYCODE_WAKEUP')
 adb('shell', 'wm', 'dismiss-keyguard')
-adb('shell', 'am', 'start', '-W', '-n', 'com.r3dzf.nerqo/.MainActivity')
+# Instrumentation owns the target process. Relaunch from a stopped process so
+# the UI recovery check also verifies loading the persisted transfer job.
+adb('shell', 'am', 'force-stop', 'com.r3dzf.nerqo')
+(OUTPUT / 'launch.txt').write_text(adb('shell', 'am', 'start', '-W', '-n', 'com.r3dzf.nerqo/.MainActivity'))
 time.sleep(5)
+capture('Launch')
 tap('Devices')
 capture('Devices')
 tap('Transfers')
