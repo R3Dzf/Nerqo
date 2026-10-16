@@ -293,7 +293,7 @@ public sealed class LanHost : IAsyncDisposable
             catch (BadHttpRequestException e) { if (!ctx.Response.HasStarted) { ctx.Response.StatusCode = e.StatusCode; await ctx.Response.WriteAsJsonAsync(new { error = e.Message }); } }
             catch (JsonException) { if (!ctx.Response.HasStarted) { ctx.Response.StatusCode = 400; await ctx.Response.WriteAsJsonAsync(new { error = "Invalid JSON" }); } }
         });
-        app.MapGet("/api/status", (HttpContext ctx) => Results.Json(new { name = Environment.MachineName, authorized = Authorize(ctx) != null, port = Port, version = "1.0.4", transferProtocol = 2, band = WifiInspector.GetBand() }));
+        app.MapGet("/api/status", (HttpContext ctx) => Results.Json(new { name = Environment.MachineName, authorized = Authorize(ctx) != null, port = Port, version = "1.0.5", transferProtocol = 2, band = WifiInspector.GetBand() }));
         app.MapPost("/api/pair", async (HttpContext ctx) =>
         {
             string ip = ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown";
@@ -556,7 +556,8 @@ public sealed class LanHost : IAsyncDisposable
             ctx.Response.Headers["X-SHA256"] = item.Sha256;
             return Results.File(Path.Combine(StorageDirectory, id + ".bin"), "application/octet-stream", item.Content, enableRangeProcessing: true);
         });
-        await app.StartAsync();
+        try { await app.StartAsync(); }
+        catch { try { await app.DisposeAsync(); } catch { } app = null; throw; }
         discoveryCancellation = new CancellationTokenSource();
         discoveryTask = RunDiscovery(discoveryCancellation.Token);
     }

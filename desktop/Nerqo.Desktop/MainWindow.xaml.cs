@@ -25,6 +25,8 @@ public partial class MainWindow : Window
     private bool preparing;
     private bool loadingTheme = true;
     private bool receiverStarted;
+    private bool startingReceiver;
+    private string connectionError = "";
     private FirewallStatus? firewallStatus;
     private readonly string firewallPromptFile = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Nerqo", "firewall-prompt-v1.txt");
     private readonly string themeFile = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Nerqo", "appearance.txt");
@@ -47,6 +49,11 @@ public partial class MainWindow : Window
     }
     private async void Start(object sender, RoutedEventArgs e)
     {
+        if (startingReceiver || receiverStarted) return;
+        startingReceiver = true;
+        RetryReceiverButton.IsEnabled = false;
+        connectionError = "";
+        ReceiverErrorLabel.Visibility = RetryReceiverButton.Visibility = Visibility.Collapsed;
         try
         {
             bool smoke = Environment.GetCommandLineArgs().Contains("--ui-smoke");
@@ -62,10 +69,29 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            StatusLabel.Text = "●  Not listening";
-            FooterLabel.Text = "Port 44888 may already be in use";
-            MessageBox.Show($"Nerqo couldn't start its local receiver.\n\n{ex.Message}\n\nCheck Windows Firewall and make sure no previous instance is running.", "Nerqo connection", MessageBoxButton.OK, MessageBoxImage.Warning);
+            connectionError = ex.GetType().Name + ": " + ex.Message + "\n" + ex.GetBaseException().GetType().Name + ": " + ex.GetBaseException().Message;
+            ReceiverErrorLabel.Text = (receiverStarted ? "Receiver started; a later setup step failed. " : "Receiver could not start. ") + connectionError;
+            ReceiverErrorLabel.Visibility = Visibility.Visible;
+            FirewallCard.Visibility = Visibility.Visible;
+            if (!receiverStarted)
+            {
+                StatusLabel.Text = "●  Receiver failed to start";
+                RetryReceiverButton.Visibility = Visibility.Visible;
+                FooterLabel.Text = "Receiver failed. Copy connection details to see the actual startup error.";
+            }
+            else { UpdateFirewallHeader(); FooterLabel.Text = "Receiver is running; connection details could not be fully refreshed."; }
+            MessageBox.Show(this, ReceiverErrorLabel.Text + "\n\nUse Copy connection details to share the error. If the address is already in use, exit any older Nerqo instance from the tray before retrying.", "Nerqo connection", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
+        finally { startingReceiver = false; RetryReceiverButton.IsEnabled = !receiverStarted; }
+    }
+    private void RetryReceiver(object sender, RoutedEventArgs e) => Start(sender, e);
+    private void CopyConnectionDetails(object sender, RoutedEventArgs e)
+    {
+        string addresses;
+        try { addresses = string.Join(", ", service.Addresses); }
+        catch (Exception ex) { addresses = ex.GetType().Name + ": " + ex.Message; }
+        Clipboard.SetText($"Nerqo {typeof(MainWindow).Assembly.GetName().Version}\nReceiver started: {receiverStarted}\nFirewall: {firewallStatus?.State} — {firewallStatus?.Message}\nLocal addresses: {addresses}\nPort: {LanHost.Port}\nError: {connectionError}");
+        FooterLabel.Text = "Connection details copied. Pairing codes, tokens and file contents are not included.";
     }
     private async void RefreshNetworkAndQr(object sender, RoutedEventArgs e)
     {
@@ -239,7 +265,7 @@ public partial class MainWindow : Window
     private void UpdateFirewallCardVisibility()
     {
         if (FirewallCard == null) return;
-        FirewallCard.Visibility = firewallStatus?.State == "ready" && TransfersPage.Visibility == Visibility.Visible
+        FirewallCard.Visibility = connectionError.Length == 0 && firewallStatus?.State == "ready" && TransfersPage.Visibility == Visibility.Visible
             ? Visibility.Collapsed : Visibility.Visible;
     }
     private void UpdateFirewallHeader()
@@ -385,7 +411,10 @@ public partial class MainWindow : Window
             var installer = await NativeUpdateService.DownloadAsync(release, progress, CancellationToken.None);
             FooterLabel.Text = "Update downloaded and SHA-256 verified";
             if (MessageBox.Show("The download passed the SHA-256 check. Launch Windows setup? Windows may warn because the installer does not yet have a trusted Authenticode signature.", "Install Nerqo", MessageBoxButton.YesNo, MessageBoxImage.Warning) == MessageBoxResult.Yes)
+            {
                 Process.Start(new ProcessStartInfo(installer) { UseShellExecute = true });
+                await Quit();
+            }
         }
         catch (Exception ex)
         {

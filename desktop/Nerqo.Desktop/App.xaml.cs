@@ -3,6 +3,7 @@ using Nerqo.Desktop.Services;
 namespace Nerqo.Desktop;
 public partial class App : System.Windows.Application
 {
+    private SingleInstance? instance;
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
@@ -25,7 +26,22 @@ public partial class App : System.Windows.Application
             }
             return;
         }
+        // Firewall helpers deliberately run separately, without opening a listener.
+        instance = SingleInstance.ClaimCurrentUser();
+        if (instance == null) { Shutdown(0); return; }
         MainWindow = new MainWindow();
+        instance.OnWake(() => Dispatcher.BeginInvoke(new Action(() =>
+        {
+            if (Dispatcher.HasShutdownStarted || MainWindow == null) return;
+            MainWindow.Show();
+            MainWindow.WindowState = WindowState.Normal;
+            MainWindow.Activate();
+        })));
         MainWindow.Show();
+    }
+    protected override void OnExit(ExitEventArgs e)
+    {
+        instance?.Dispose();
+        base.OnExit(e);
     }
 }

@@ -9,7 +9,7 @@ namespace Nerqo.Desktop.Services;
 
 public sealed record FirewallRuleView(string Program, bool Enabled, int Direction, int Action,
     int Protocol, string Ports, int Profiles, string RemoteAddresses = "*", string LocalAddresses = "*",
-    string RemotePorts = "*", string Service = "", string Interfaces = "All");
+    string RemotePorts = "*", string Service = "", string Interfaces = "All", string Name = "");
 public sealed record FirewallStatus(string State, string Message, bool CanAllow = false);
 
 public static class FirewallAccess
@@ -39,12 +39,28 @@ public static class FirewallAccess
             && (SameProgram(r.Program, executable) || (r.Action == 0 && string.IsNullOrEmpty(r.Program)))).ToArray();
         bool Relevant(FirewallRuleView r, int protocol, int port) =>
             r.Protocol == 256 || (r.Protocol == protocol && IncludesPort(r.Ports, port));
-        bool blocked = matching.Any(r => r.Action == 0 && (Relevant(r, Tcp, 44888) || Relevant(r, Udp, 44889)));
+        bool blocked = matching.Any(r => IsApplicableBlock(r, executable));
         bool Allows(int protocol, int port) => matching.Any(r => r.Action == 1 && Relevant(r, protocol, port)
             && r.LocalAddresses == "*" && r.RemotePorts == "*" && string.IsNullOrEmpty(r.Service)
             && (string.IsNullOrEmpty(r.Interfaces) || r.Interfaces.Equals("All", StringComparison.OrdinalIgnoreCase))
             && r.RemoteAddresses.Split(',').Any(s => s.Trim() == "*" || s.Trim().Equals("LocalSubnet", StringComparison.OrdinalIgnoreCase)));
         return (Allows(Tcp, 44888) && Allows(Udp, 44889), blocked);
+    }
+    public static bool IsApplicableBlock(FirewallRuleView rule, string executable)
+    {
+        if (!rule.Enabled || rule.Direction != 1 || rule.Action != 0 || (rule.Profiles & PrivateProfile) == 0)
+            return false;
+        if (!string.IsNullOrEmpty(rule.Program) && !SameProgram(rule.Program, executable)) return false;
+        // A service-scoped rule does not apply to this normal desktop process.
+        // Address/interface-scoped general rules cannot prove this app is blocked.
+        if (!string.IsNullOrEmpty(rule.Service)) return false;
+        bool namedApp = SameProgram(rule.Program, executable);
+        if (!namedApp && (rule.LocalAddresses != "*" || rule.RemotePorts != "*"
+            || !(string.IsNullOrEmpty(rule.Interfaces) || rule.Interfaces.Equals("All", StringComparison.OrdinalIgnoreCase))
+            || !rule.RemoteAddresses.Split(',').Any(s => s.Trim() == "*" || s.Trim().Equals("LocalSubnet", StringComparison.OrdinalIgnoreCase))))
+            return false;
+        return rule.Protocol == 256 || (rule.Protocol == Tcp && IncludesPort(rule.Ports, 44888))
+            || (rule.Protocol == Udp && IncludesPort(rule.Ports, 44889));
     }
     private static List<FirewallRuleView> ReadRules(object policy)
     {
@@ -65,7 +81,7 @@ public static class FirewallAccess
                         (int)rule.Action, protocol, protocol is Tcp or Udp ? (string)rule.LocalPorts : "*", (int)rule.Profiles,
                         (string?)rule.RemoteAddresses ?? "*", (string?)rule.LocalAddresses ?? "*",
                         protocol is Tcp or Udp ? (string)rule.RemotePorts : "*", (string?)rule.ServiceName ?? "",
-                        (string?)rule.InterfaceTypes ?? "All"));
+                        (string?)rule.InterfaceTypes ?? "All", (string?)rule.Name ?? ""));
                 }
                 finally { Release(rule); }
             }
@@ -80,11 +96,17 @@ public static class FirewallAccess
         {
             instance = Create("HNetCfg.FwPolicy2");
             dynamic policy = instance;
-            var state = Evaluate(ReadRules(instance), Executable);
+            var snapshots = ReadRules(instance);
+            var state = Evaluate(snapshots, Executable);
             if (!ProfileFlag(instance, "FirewallEnabled")) return new("disabled", "Windows Firewall is off for private networks. Nerqo has not changed it.");
             if (ProfileFlag(instance, "BlockAllInboundTraffic") || (int)policy.LocalPolicyModifyState != 0)
                 return new("managed", "Windows policy restricts inbound access. Review Windows Firewall settings or contact your administrator.");
-            if (state.Blocked) return new("blocked", "A Windows Firewall rule explicitly blocks Nerqo. Review that rule in Windows Firewall; Nerqo will not remove it automatically.");
+            if (state.Blocked)
+            {
+                string names = string.Join(", ", snapshots.Where(r => IsApplicableBlock(r, Executable))
+                    .Select(r => string.IsNullOrWhiteSpace(r.Name) ? "Unnamed rule" : r.Name).Distinct().Take(3));
+                return new("blocked", "Inbound blocking rule to review: " + names + ". Nerqo has not changed it.");
+            }
             if (!state.Covered) return new("missing", "Allow Nerqo to receive files and discover devices on your private Wi-Fi or hotspot.", true);
             if (((int)policy.CurrentProfileTypes & PrivateProfile) == 0 && ((int)policy.CurrentProfileTypes & 4) != 0)
                 return new("public", "Private-network rules are ready. This connection is Public: mark your trusted Wi-Fi as Private in Windows network settings.");

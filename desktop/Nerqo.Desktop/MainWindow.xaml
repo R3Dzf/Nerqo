@@ -7,7 +7,7 @@
     <RadioButton x:Name="DevicesNav" GroupName="Navigation" Tag="Devices" Style="{StaticResource Navigation}" Checked="Navigate"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE772;" FontFamily="Segoe MDL2 Assets" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}" Margin="0,0,13,0"/><TextBlock Text="Devices" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}"/></StackPanel></RadioButton>
     <RadioButton x:Name="SettingsNav" GroupName="Navigation" Tag="Settings" Style="{StaticResource Navigation}" Checked="Navigate"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE713;" FontFamily="Segoe MDL2 Assets" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}" Margin="0,0,13,0"/><TextBlock Text="Settings" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}"/></StackPanel></RadioButton>
    </StackPanel>
-   <StackPanel DockPanel.Dock="Bottom"><Border Background="#1D4B50" CornerRadius="14" Padding="16" Margin="0,0,0,20"><StackPanel><TextBlock Text="Your devices. Your files." Foreground="#C1F5DF" FontSize="12" FontWeight="SemiBold"/><TextBlock Text="Shared over your local network." Foreground="#A3C1BE" FontSize="11" TextWrapping="Wrap" Margin="0,6,0,0"/></StackPanel></Border><TextBlock Text="Nerqo 1.0.4" Foreground="#8EB5B3" FontSize="11" Margin="12,0,0,0"/></StackPanel>
+   <StackPanel DockPanel.Dock="Bottom"><Border Background="#1D4B50" CornerRadius="14" Padding="16" Margin="0,0,0,20"><StackPanel><TextBlock Text="Your devices. Your files." Foreground="#C1F5DF" FontSize="12" FontWeight="SemiBold"/><TextBlock Text="Shared over your local network." Foreground="#A3C1BE" FontSize="11" TextWrapping="Wrap" Margin="0,6,0,0"/></StackPanel></Border><TextBlock Text="Nerqo 1.0.5" Foreground="#8EB5B3" FontSize="11" Margin="12,0,0,0"/></StackPanel>
    <Grid/>
   </DockPanel></Border>
   <Grid Grid.Column="1" Margin="32,26,32,20"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
@@ -17,7 +17,10 @@
      <Border x:Name="FirewallCard" Style="{StaticResource Card}" Margin="0,0,0,20"><StackPanel>
       <TextBlock Text="Windows Firewall" FontSize="18" FontWeight="SemiBold"/>
       <TextBlock x:Name="FirewallLabel" Text="Checking private-network permissions…" Style="{StaticResource Caption}" Margin="0,8,0,12"/>
-      <WrapPanel><Button x:Name="AllowFirewallButton" Content="Allow private network access" Click="AllowFirewall" Visibility="Collapsed" Margin="0,0,10,8"/>
+      <TextBlock x:Name="ReceiverErrorLabel" Visibility="Collapsed" Style="{StaticResource Caption}" Margin="0,0,0,12"/>
+      <WrapPanel><Button x:Name="RetryReceiverButton" Content="Retry receiver" Click="RetryReceiver" Visibility="Collapsed" Margin="0,0,10,8"/>
+       <Button Content="Copy connection details" Click="CopyConnectionDetails" Style="{StaticResource Secondary}" Margin="0,0,10,8"/>
+       <Button x:Name="AllowFirewallButton" Content="Allow private network access" Click="AllowFirewall" Visibility="Collapsed" Margin="0,0,10,8"/>
        <Button x:Name="CheckFirewallButton" Content="Check again" Click="CheckFirewall" Style="{StaticResource Secondary}" Margin="0,0,10,8"/>
        <Button Content="Windows Firewall settings" Click="OpenFirewallSettings" Style="{StaticResource Secondary}" Margin="0,0,10,8"/>
        <Button x:Name="NetworkSettingsButton" Content="Network settings" Click="OpenNetworkSettings" Style="{StaticResource Secondary}" Visibility="Collapsed" Margin="0,0,0,8"/>

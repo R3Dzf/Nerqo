@@ -3,6 +3,7 @@
   <ItemGroup><FrameworkReference Include="Microsoft.AspNetCore.App" />
     <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="9.0.0"/>
     <Compile Include="Program.cs"/>
+    <Compile Include="../Nerqo.Desktop/Services/SingleInstance.cs" Link="SingleInstance.cs"/>
     <Compile Include="../Nerqo.Desktop/Services/FirewallAccess.cs" Link="FirewallAccess.cs"/>
     <Compile Include="../Nerqo.Desktop/Services/LanHost.cs" Link="LanHost.cs"/>
     <Compile Include="../Nerqo.Desktop/Services/LanIdentity.cs" Link="LanIdentity.cs"/>

@@ -228,7 +228,7 @@ private fun bytes(size: Long): String = when {
                         Title("Keep Nerqo up to date")
                         Caption("Updates use the internet. Your local transfers work offline.")
                         Button(onClick = onUpdates, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("Check for app updates") }
-                        Caption("Nerqo 1.0.4 · Windows + Android")
+                        Caption("Nerqo 1.0.5 · Windows + Android")
                     } }
                 }
             }

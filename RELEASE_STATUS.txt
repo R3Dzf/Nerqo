@@ -1,11 +1,10 @@
-Nerqo native 1.0.4 Stable channel
+Nerqo native 1.0.5 Stable channel
 
-Native Windows WPF and Android Compose apps. 1.0.4 adds consent-based Windows
-Firewall setup for private local sharing and an accessible, theme-aware appearance
-switch. Permanent Android signing, native installer updates and compatible delta
+Native Windows WPF and Android Compose apps. 1.0.5 corrects service-scoped Firewall false positives, coordinates a single
+Windows instance and provides actual receiver errors with retry/copy diagnostics. Permanent Android signing, native installer updates and compatible delta
 updates continue. Release publication requires all automated gates to pass.
 
 LAN/Wi-Fi and normal hotspot transfers are implemented. Native Wi-Fi Direct and
 Bluetooth are not implemented. Physical-device acceptance and Windows trusted
 Authenticode publisher signing remain outstanding. See docs/NATIVE_ROADMAP.md
-and docs/releases/v1.0.4.md for the supported scope and validation limits.
+and docs/releases/v1.0.5.md for the supported scope and validation limits.

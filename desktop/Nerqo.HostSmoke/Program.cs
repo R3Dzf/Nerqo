@@ -20,10 +20,38 @@ static void TestFirewallDecisions()
         throw new Exception("Explicit application block ignored");
     if (!FirewallAccess.Evaluate(new[] { tcp, udp, tcp with { Program = "", Action = 0, Protocol = 256 } }, app).Blocked)
         throw new Exception("Global inbound block ignored");
+    var generalBlock = tcp with { Program = "", Action = 0, Protocol = 256 };
+    foreach (var scoped in new[] { generalBlock with { Service = "OtherWindowsService" },
+        generalBlock with { LocalAddresses = "127.0.0.1" }, generalBlock with { RemoteAddresses = "203.0.113.1" },
+        generalBlock with { Interfaces = "RemoteAccess" }, generalBlock with { RemotePorts = "53" },
+        tcp with { Action = 0, Service = "OtherWindowsService" } })
+        if (FirewallAccess.Evaluate(new[] { tcp, udp, scoped }, app).Blocked)
+            throw new Exception("An unrelated/scoped rule falsely blocked the desktop app");
     if (!FirewallAccess.Evaluate(new[] { tcp with { Ports = "44000-45000" }, udp }, app).Covered)
         throw new Exception("Port range allow rule rejected");
 }
 TestFirewallDecisions();
+static void TestSingleInstance()
+{
+    string key = "test-" + Guid.NewGuid().ToString("N");
+    using (var owner = SingleInstance.Claim(key) ?? throw new Exception("First instance rejected"))
+    {
+        bool duplicate = Task.Run(() =>
+        {
+            using var second = SingleInstance.Claim(key);
+            return second != null;
+        }).GetAwaiter().GetResult();
+        if (duplicate || !owner.WaitForWake(3000)) throw new Exception("Duplicate app was not rejected or did not signal owner");
+    }
+    bool reopened = Task.Run(() =>
+    {
+        using var next = SingleInstance.Claim(key);
+        return next != null;
+    }).GetAwaiter().GetResult();
+    if (!reopened) throw new Exception("Application could not reopen after exit");
+}
+TestSingleInstance();
+
 
 if (!NativeUpdateService.IsNewerVersion("v0.6.0", new Version(0,5,0))) throw new Exception("Native update version detection failed");
 if (NativeUpdateService.IsNewerVersion("v0.5.0", new Version(0,5,0))) throw new Exception("Same version should not upgrade");
