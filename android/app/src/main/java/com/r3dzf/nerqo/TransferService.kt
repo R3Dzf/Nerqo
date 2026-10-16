@@ -96,7 +96,7 @@ class TransferService : Service() {
             return START_NOT_STICKY
         }
         if (intent?.action == "pause") {
-            stopForeground(STOP_FOREGROUND_REMOVE)
+            stopForeground(STOP_FOREGROUND_DETACH)
             showOutcome(job, "Paused", "Resume from the saved checkpoint", progress)
             stopSelf(); return START_NOT_STICKY
         }
@@ -108,7 +108,7 @@ class TransferService : Service() {
         } catch (error: Exception) {
             releaseLocks(); TransferRuntime.running = false
             transferUi = TransferUi(job.title, paused = true, detail = error.message ?: "Could not start background transfer")
-            stopForeground(STOP_FOREGROUND_REMOVE)
+            stopForeground(STOP_FOREGROUND_DETACH)
             showOutcome(job, "Interrupted", transferUi!!.detail, progress)
             stopSelf()
         }
@@ -121,7 +121,7 @@ class TransferService : Service() {
     // Android 15 data-sync time budget: save a checkpoint and stop promptly.
     override fun onTimeout(startId: Int, fgsType: Int) {
         transferControl?.interrupt(TransferStop.PAUSE, closeAsync = true)
-        stopForeground(STOP_FOREGROUND_REMOVE)
+        stopForeground(STOP_FOREGROUND_DETACH)
         pendingTransfer?.let { showOutcome(it, "Paused", "Android background time limit reached. Open Nerqo to resume.", progress) }
         stopSelf()
     }
@@ -250,7 +250,7 @@ class TransferService : Service() {
                 TransferControl.workerActive.set(false)
                 onMain {
                     TransferRuntime.running = false; transferControl = null
-                    stopForeground(STOP_FOREGROUND_REMOVE)
+                    stopForeground(STOP_FOREGROUND_DETACH)
                     if (!destroyed) showOutcome(job, outcome, outcomeDetail, if (outcome == "Completed") 1f else progress)
                     progress = 0f; stopSelf()
                 }
