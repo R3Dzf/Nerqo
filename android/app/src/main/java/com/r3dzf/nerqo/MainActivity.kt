@@ -494,7 +494,12 @@ class MainActivity : ComponentActivity() {
             if (uri != null && entry != null) download(entry, uri)
         }
         LaunchedEffect(device?.address, token) {
-            while (true) { delay(7000); if (device != null && token != null && !busy) refresh() }
+            while (true) {
+                delay(7000)
+                // A refresh also owns the serial worker and disables Resume.
+                // Keep recovery controls available while a saved job exists.
+                if (device != null && token != null && !busy && pendingTransfer == null) refresh()
+            }
         }
         NerqoTheme(darkMode) {
             NerqoScreen(

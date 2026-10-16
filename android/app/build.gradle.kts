@@ -10,8 +10,8 @@ android {
         applicationId = "com.r3dzf.nerqo"
         minSdk = 26
         targetSdk = 35
-        versionCode = 10002
-        versionName = "1.0.2"
+        versionCode = 10003
+        versionName = "1.0.3"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     buildFeatures { compose = true }

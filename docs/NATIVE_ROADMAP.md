@@ -1,6 +1,6 @@
 # Nerqo native implementation status
 
-Development branch: `dev/native-5ghz-20261016`. Native version: **1.0.2**.
+Development branch: `dev/native-5ghz-20261016`. Native version: **1.0.3**.
 This document records implementation and validation separately. A green build is
 not evidence of a successful transfer between physical Windows/Android devices.
 
@@ -16,7 +16,7 @@ not evidence of a successful transfer between physical Windows/Android devices.
 | 06 Text/links | Two-way text and links; copy; Android share target; explicit Paste button | Optional clipboard sync remains unimplemented; clipboard is read only on explicit Paste |
 | 07 Security | Persistent Windows TLS identity; QR/manual identity verification; Android pinning; revocable peer tokens; path/reparse checks | Independent audit and broader adversarial/lifecycle testing |
 | 08 Connection alternatives | Same LAN; normal phone hotspot; system-managed Android local-only hotspot with generated secure credentials | Native Wi-Fi Direct and Bluetooth transports are not implemented |
-| 09 Delivery/updates | WPF installer; permanent Android certificate pin; stable-only native updater; full/delta reconstruction; coordinated native versioning; source/payload/signing checks; per-user installer 1.0.1 → 1.0.2 tested on a Windows CI runner | Physical in-place upgrade; Windows Authenticode publisher signature; final acceptance before Stable |
+| 09 Delivery/updates | WPF installer; permanent Android certificate pin; stable-only native updater; full/delta reconstruction; coordinated native versioning; source/payload/signing checks; per-user installer 1.0.1 → 1.0.3 tested on a Windows CI runner | Physical in-place upgrade; Windows Authenticode publisher signature; final acceptance before Stable |
 
 ## UI and identity (1.0.1)
 
@@ -32,7 +32,7 @@ a file. Windows PNG/ICO and Android vector/adaptive/monochrome resources impleme
 the same mark. No browser, console, Python interpreter or cloud relay is launched
 by the native apps.
 
-## Saved transfers and folder recovery (1.0.2)
+## Saved transfers and folder recovery (1.0.3)
 
 Android retains the active transfer job and document permissions. Pause closes
 active requests and document streams; Resume reopens and verifies saved state.
@@ -68,14 +68,14 @@ hardware.
 - Android 35 emulator UI smoke is configured for actual TLS/SAF interrupted downloads, folder retry, a deliberately lost upload-finish reply and cancellation, followed by Compose Pause/Resume and output hash verification. The latest fixture-grant correction is pending execution; do not count the earlier permission failure as a passing transport check.
 - Android JVM tests exercise the saved-member integrity decision with exact,
   empty, truncated, oversized and same-size altered content.
-- The current 1.0.2 local JVM run passed all 15 tests: saved-member integrity,
+- The current 1.0.3 local JVM run passed all 15 tests: saved-member integrity,
   byte-range resume, malformed/ignored ranges, altered/truncated content,
   nonseekable storage and responsive asynchronous stop. The Python regression
   suite passed 36 tests with one skipped. These do not replace emulator or
   physical-device acceptance.
 - The Stable workflow only publishes from `main`, with both platforms successful
   and a permanent-key-signed APK matching the independently compiled payload.
-- Installer upgrade smoke installs the previous native 1.0.1 build, upgrades to 1.0.2, and checks the persistent TLS identity, authorized device token, shared note and received file. This passed on a disposable Windows CI runner, not the user’s PC.
+- Installer upgrade smoke installs the previous native 1.0.1 build, upgrades to 1.0.3, and checks the persistent TLS identity, authorized device token, shared note and received file. This passed on a disposable Windows CI runner, not the user’s PC.
 - A debug APK is for development testing. It cannot update the permanent-key
   installation; do not uninstall the stable installation to try it.
 - The signing private key remains outside the public repository. Builds here do

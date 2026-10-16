@@ -40,7 +40,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         route = urlsplit(self.path)
         if route.path == '/api/status':
-            with lock: self.json({'name': 'CI Windows fixture', 'port': 44888, 'version': '1.0.2', 'transferProtocol': 2,
+            with lock: self.json({'name': 'CI Windows fixture', 'port': 44888, 'version': '1.0.3', 'transferProtocol': 2,
                                   'published': state['published'], 'ranges': state['range_offsets'], 'uploadChunks': state['upload_chunks']})
             return
         if not self.authenticated(): return

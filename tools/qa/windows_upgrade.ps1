@@ -63,13 +63,13 @@ try {
     Stop-Nerqo
     Install-Nerqo $NewInstaller
     $current = Start-Nerqo
-    if ($current.version -ne '1.0.2') { throw 'Installed app did not upgrade to 1.0.2' }
+    if ($current.version -ne '1.0.3') { throw 'Installed app did not upgrade to 1.0.3' }
     $after = Invoke-RestMethod 'https://127.0.0.1:44888/api/items' -Headers $headers -SkipCertificateCheck
     if ($after.items[0].id -ne $id) { throw 'Shared note or paired token lost during upgrade' }
     foreach ($fixture in @($identity, $saved, $received)) {
         if ((Get-FileHash -LiteralPath $fixture.Path).Hash -ne $fixture.Hash) { throw "Upgrade changed preserved data: $($fixture.Path)" }
     }
     New-Item -ItemType Directory -Force dist/qa | Out-Null
-    'PASS: per-user installer 1.0.1 -> 1.0.2; installed native receiver; persistent TLS identity; paired token; shared note; received file preserved.' | Set-Content dist/qa/windows-upgrade.txt
+    'PASS: per-user installer 1.0.1 -> 1.0.3; installed native receiver; persistent TLS identity; paired token; shared note; received file preserved.' | Set-Content dist/qa/windows-upgrade.txt
     Get-Content dist/qa/windows-upgrade.txt
 } finally { Stop-Nerqo }

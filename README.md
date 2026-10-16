@@ -4,7 +4,7 @@
 
 Nerqo is a native Windows and Android application for transferring files, folders, links and text over a local network. A router does not need internet access; the devices can also use an Android hotspot.
 
-> **Development branch:** `dev/native-5ghz-20261016`. Native 1.0.2 adds saved transfer sessions, Pause/Resume/Cancel, byte-range download recovery and idempotent upload completion to the matching Windows/Android interface introduced in 1.0.1. Native CI artifacts are development builds; no official Stable release is claimed. Physical-device acceptance remains required. The `main` branch and older v0.3.0 release are unchanged.
+> **Development branch:** `dev/native-5ghz-20261016`. Native 1.0.3 adds saved transfer sessions, Pause/Resume/Cancel, byte-range download recovery and idempotent upload completion to the matching Windows/Android interface introduced in 1.0.1. Native CI artifacts are development builds; no official Stable release is claimed. Physical-device acceptance remains required. The `main` branch and older v0.3.0 release are unchanged.
 
 ## Native applications
 
@@ -39,7 +39,7 @@ Both apps organize sharing into **Transfers**, **Devices** and **Settings**, wit
 - Both folder directions stream files over HTTPS with verified SHA-256. Windows lists folder members in a manifest, and Android creates a folder tree using the system document provider.
 - Android → Windows direct folder transfers persist each file’s resumable upload session. Windows → Android saves members directly to the selected Android folder without ZIP staging. Android folder receiving rehashes completed members before skipping them, and resumes the active member from a saved byte checkpoint where the document provider supports seeking.
 - **Pause / Resume / Cancel:** Android saves the active job and source/destination permissions. Reopen the app to resume an interrupted job. Downloads checkpoint every 4 MiB, rehash the saved prefix and verify the complete file. Storage providers without seeking restart the active file safely. Cancel removes tracked unverified partial documents and attempts remote upload cleanup while preserving completed files.
-- A lost upload-completion reply can be retried without publishing a duplicate file. Windows binds upload/folder sessions and completion receipts to the paired sender. Update Windows and Android together to 1.0.2 for the new upload protocol.
+- A lost upload-completion reply can be retried without publishing a duplicate file. Windows binds upload/folder sessions and completion receipts to the paired sender. Update Windows and Android together to 1.0.3 for the new upload protocol.
 
 ## Wi-Fi / hotspot performance
 
@@ -57,8 +57,8 @@ Android release signing uses a permanent, pinned public certificate fingerprint.
 - [Native implementation roadmap](docs/NATIVE_ROADMAP.md)
 - [Offline Android release signing](docs/OFFLINE_RELEASE_SIGNING.md)
 
-The native CI compiles WPF and Android, runs encrypted transport and integrity smoke tests, checks a per-user Windows installer upgrade from 1.0.1 to 1.0.2 with preserved pairing/data, and produces build artifacts (some CI artifact names retain the historical Preview suffix). The native Stable workflow is gated on `main`: it accepts only a native Windows installer and an Android APK signed with the permanent key, whose payload must match the independently built unsigned package. It does **not** publish the old Python/browser app.
+The native CI compiles WPF and Android, runs encrypted transport and integrity smoke tests, checks a per-user Windows installer upgrade from 1.0.1 to 1.0.3 with preserved pairing/data, and produces build artifacts (some CI artifact names retain the historical Preview suffix). The native Stable workflow is gated on `main`: it accepts only a native Windows installer and an Android APK signed with the permanent key, whose payload must match the independently built unsigned package. It does **not** publish the old Python/browser app.
 
-The separate Android UI smoke is configured to exercise TLS/SAF download recovery, folder recovery, lost upload acknowledgements and cancellation, then restore, pause and resume a download using the real Compose controls and verify its saved bytes. Its 1.0.2 fixture-permission correction remains under validation. WPF screens are captured from the running Windows app.
+The separate Android UI smoke is configured to exercise TLS/SAF download recovery, folder recovery, lost upload acknowledgements and cancellation, then restore, pause and resume a download using the real Compose controls and verify its saved bytes. Its 1.0.3 fixture-permission correction remains under validation. WPF screens are captured from the running Windows app.
 
 **Release-validation limits:** Wi-Fi Direct/Bluetooth fallbacks (where supported), real Wi-Fi/hotspot/5 GHz transfer benchmarking, testing on physical Windows/Android devices, and upgrades on the user’s physical devices have not been completed. Passing CI validates the build and emulated transport, not every router or phone. The Windows installer has no Authenticode publisher certificate.

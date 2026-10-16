@@ -41,12 +41,37 @@ def tap(label, attr='text'):
             continue
         for node in tree.iter('node'):
             if node.get(attr) == label:
+                parents = {child: parent for parent in tree.iter() for child in parent}
+                ancestor = node
+                disabled = False
+                while ancestor is not None:
+                    disabled |= ancestor.get('enabled') == 'false'
+                    ancestor = parents.get(ancestor)
+                if disabled:
+                    continue
                 bounds = list(map(int, re.findall(r'\d+', node.get('bounds', ''))))
                 if len(bounds) == 4:
                     adb('shell', 'input', 'tap', str((bounds[0]+bounds[2])//2), str((bounds[1]+bounds[3])//2))
                     return
         time.sleep(1)
     raise RuntimeError(f'Native UI element missing: {label}')
+
+
+def resume(must_be_active=False):
+    # Compose recovery cards move as progress appears. A click is successful
+    # only once the app exposes Pause (or the transfer finishes), not merely
+    # because adb delivered a tap to coordinates from an accessibility dump.
+    for _ in range(4):
+        tap('Resume')
+        time.sleep(.4)
+        adb('shell', 'uiautomator', 'dump', '/sdcard/nerqo-ui.xml')
+        tree = ET.fromstring(adb('shell', 'cat', '/sdcard/nerqo-ui.xml'))
+        labels = [n.get('text', '') for n in tree.iter('node')]
+        if 'Pause' in labels or (not must_be_active and 'Resume' not in labels):
+            return
+        if any(label.startswith('Interrupted ·') for label in labels):
+            failure('Resume was interrupted', tree)
+    failure('Resume did not start a transfer', tree)
 
 
 adb('shell', 'input', 'keyevent', 'KEYCODE_WAKEUP')
@@ -57,12 +82,12 @@ tap('Devices')
 capture('Devices')
 tap('Transfers')
 capture('Transfer-restored')
-tap('Resume')
+resume(must_be_active=True)
 time.sleep(1)
 tap('Pause')
 time.sleep(1)
 capture('Transfer-paused')
-tap('Resume')
+resume()
 for _ in range(25):
     time.sleep(2)
     try:
