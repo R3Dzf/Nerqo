@@ -22,7 +22,7 @@ jobs:
       - id: version
         shell: bash
         run: |
-          TAG="v$(sed -n 's/.*versionName = "\\([0-9.]*\\)".*/\\1/p' android/app/build.gradle.kts)"
+          TAG="v$(grep -m1 'versionName =' android/app/build.gradle.kts | cut -d '"' -f2)"
           [[ "$TAG" =~ ^v[1-9][0-9]*\\.[0-9]+\\.[0-9]+$ ]]
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
