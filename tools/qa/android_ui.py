@@ -22,6 +22,15 @@ def capture(name):
     (OUTPUT / f'{name}.png').write_bytes(adb('exec-out', 'screencap', '-p', binary=True))
 
 
+def failure(message, tree=None):
+    capture('Transfer-failure')
+    (OUTPUT / 'failure-runtime.txt').write_text(adb('logcat', '-d', '-s', 'AndroidRuntime:E'))
+    if tree is not None:
+        (OUTPUT / 'failure.xml').write_text(ET.tostring(tree, encoding='unicode'))
+        message += ': ' + ' | '.join(n.get('text', '') for n in tree.iter('node') if n.get('text'))
+    raise RuntimeError(message)
+
+
 def tap(label, attr='text'):
     for _ in range(12):
         try:
@@ -59,12 +68,14 @@ for _ in range(25):
     try:
         adb('shell', 'uiautomator', 'dump', '/sdcard/nerqo-ui.xml')
         tree = ET.fromstring(adb('shell', 'cat', '/sdcard/nerqo-ui.xml'))
+        if any(n.get('text', '').startswith('Interrupted ·') for n in tree.iter('node')):
+            failure('The native UI reported an interrupted transfer', tree)
         if not any(n.get('text') in ('Resume', 'Pause') for n in tree.iter('node')):
             break
     except (subprocess.CalledProcessError, ET.ParseError):
         continue
 else:
-    raise RuntimeError('Native UI transfer did not complete after resume')
+    failure('Native UI transfer did not complete after resume', tree)
 capture('Transfers')
 received = adb('exec-out', 'run-as', 'com.r3dzf.nerqo', 'cat', 'cache/transport-fixtures/ui-resume.bin', binary=True)
 expected = bytes(range(256)) * (32 * 4096) + b'ui'

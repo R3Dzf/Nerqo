@@ -1,40 +1,72 @@
-# Nerqo application delta updates
+# Native Nerqo application updates
 
-**Two distinct capabilities:** File transfer between paired devices works offline on a trusted LAN. Application updates come from GitHub Releases over HTTPS when Internet is available. No paid server or subscription is needed.
+File sharing works offline over the local network. Checking and downloading app
+updates uses GitHub Releases over HTTPS and requires internet access.
 
-## User flow
+## Install and update
 
-Windows: launch packaged `Nerqo.exe`, open the local desktop interface, visit **Connect → Application updates**, press **Check for updates**, **Download update** and **Install & restart**. The Windows EXE can update itself without re-downloading the whole EXE if the current installed EXE has the precise expected SHA-256. The local Python source run can check but deliberately cannot self-overwrite.
+On **Windows**, open **Settings → Check for app updates**. Nerqo shows the version
+and download size, downloads a verified native installer, then asks before
+launching Setup. The per-user installer upgrades the installed WPF app and keeps
+its existing data under `%LOCALAPPDATA%\Nerqo`. No browser, terminal or Python
+runtime is part of the native installation.
 
-Android: open the Nerqo companion, tap **Check for app updates** on the connection screen or from the three-dot menu. Confirm download, then approve the Android package installer. Android enforces the existing APK signing certificate on the upgrade; **a GitHub Actions debug APK, signed with a changing debug key, is not a reliable upgrade path**. Do NOT uninstall a version with data to make an incompatible signer install. Stable releases need the same private release signing key every time.
+On **Android**, open **Settings → Check for app updates**. Confirm the download,
+then approve Android's package installer. Every release must use the original
+permanent signing key and an increasing `versionCode`. Never uninstall an
+existing installation just to accept an APK with a different signing key. Debug
+APKs are test artifacts and cannot replace the permanent-key installation.
 
-The updater chooses the smallest applicable delta (at least 10% smaller than the full package), verifies the downloaded patch's SHA-256, reconstructs the new APK/EXE from the exact original binary, and then validates the final SHA-256 and size. On missing/inapplicable/corrupt delta, it falls back to verified full download. The previous Windows EXE is kept as `.nerqo-backup` for recovery if the replacement cannot start. Installation is always opt-in; a background update does not change the program silently.
+The updater accepts eligible newer stable releases. A source commit or a native
+CI artifact does not publish an app update. The current development branch is
+not yet an official Stable release, so installing its build does not make that
+build appear in the in-app update checker.
 
-**No released packages yet?** GitHub's `releases/latest` will return 404 and the Windows UI treats that as up-to-date. A source-only commit does not publish an app upgrade.
+## Smaller downloads
 
-## Release signing — required before production Android updates
+Both updaters choose an applicable delta only when it is at least 10% smaller
+than the full package and the original bytes match the required SHA-256.
 
-1. Generate a **single, stable Android release keystore** on a trusted machine with Android's `keytool`, and keep an encrypted offline backup of that keystore AND credentials. Losing it means existing installations cannot be upgraded with the same app ID.
-2. In GitHub repo Settings → Secrets and variables → Actions add:
-   - `NERQO_ANDROID_KEYSTORE_BASE64`: base64 content of the keystore file, not its location.
-   - `NERQO_ANDROID_STORE_PASSWORD`: keystore password.
-   - `NERQO_ANDROID_KEY_ALIAS`: chosen key alias.
-   - `NERQO_ANDROID_KEY_PASSWORD`: key password.
-3. When ready to publish, increment **both** `nerqo/version.py` and `android/app/build.gradle.kts` (`versionName`, `versionCode`; `versionCode` always increases). Then push an annotated or lightweight tag `vX.Y.Z` to `main`.
-4. `.github/workflows/release.yml` builds EXE plus stable-signed Android release APK and publishes them as GitHub Release assets, with a `update-manifest.json` and deltas from the previous release when worthwhile. If signing secrets are not supplied the release job fails **closed**, rather than publishing an APK with an inconsistent signing key.
+- Windows reconstructs the **installer** from a previously downloaded installer
+  cached by its updater under `%LOCALAPPDATA%\Nerqo\Updates`. An initial manual
+  installation may require a full download because that cache does not exist.
+- Android reconstructs the new APK from the installed APK.
+- The patch and final reconstructed package are checked for exact size and
+  SHA-256. An inapplicable or corrupt delta falls back to the verified full asset.
+- Installation stays opt-in. A background download does not install silently.
 
-Never add keystores, signing passwords, personal tokens, or `.env` files to source control. Do not use the automatic release process until there has been a device test of the previous and newer signed APKs. If Windows installs to a protected folder, its update requires write permissions or a separate privileged installer.
+## Preparing an official native release
 
-## Patch format
+1. Keep WPF, Inno Setup and Android semantic versions aligned; increase Android's
+   `versionCode`. Do not reuse a published version for different production code.
+2. Pass the native build, transport, recovery, installer and device acceptance
+   checks in [NATIVE_ROADMAP.md](NATIVE_ROADMAP.md).
+3. Build the unsigned native Android Release APK, sign it privately with the
+   **existing** permanent key and compare its payload with the independent build.
+   Follow [OFFLINE_RELEASE_SIGNING.md](OFFLINE_RELEASE_SIGNING.md). Never generate
+   a replacement identity for an installed application.
+4. Stage only the signed public APK and its checksum under `downloads/` as
+   documented by the signing procedure. Keep private keys and recovery records
+   outside the repository.
+5. Publish through `.github/workflows/release.yml` **from `main` only**. It builds
+   the native Windows installer, independently rebuilds Android, verifies the
+   permanent Android certificate and payload, and prepares both platform assets,
+   `update-manifest.json` and useful deltas from the prior release. It refuses to
+   overwrite an existing release.
 
-`NRQDEL01` format: 8-byte magic; unsigned 64-bit old/new sizes; two 32-byte SHA-256 digests; records `C` (copy `uint64` base offset and `uint32` count), `D` (uint32 decompressed byte count, uint32 compressed byte count, zlib bytes), then `E` terminator. Integer encoding is network/big-endian. Max output is 8 GiB; literal records are capped at 1 MiB. Python generates and applies; Java reconstructs Android binary directly from the installed APK path. All operations are bounded; no arbitrary executable commands appear in patches.
+The workflow expects a privately signed APK; repository signing secrets are not
+required by this workflow. Publishing a tag on a development branch does not
+publish a Stable version.
 
-Releases include a manifest with version, base SHA-256, target SHA-256, patch SHA-256, and exact byte sizes. Asset URLs are constrained to `https://github.com/R3Dzf/Nerqo/releases/download/v<version>/...` and are found through the official GitHub Release API. Repo/TLS compromise remains a trust boundary: SHA-256 **is not** a signature on a manifest, and the Windows EXE has **no Authenticode publisher signature**. Android additionally enforces signing-key continuity.
+## Integrity and verification
 
-## Tests
+Assets are restricted to the expected `R3Dzf/Nerqo` GitHub Release URLs. The
+`NRQDEL01` patch format carries original/target sizes and SHA-256 hashes, bounded
+copy/literal records and a terminator; it does not execute arbitrary commands.
+Native C#, Android Java and Python implementations are checked by the available
+transport/regression suites.
 
-- `python -m unittest discover -s tests -v` tests binary shift/reuse, corruption rejection, source base verification, release manifest and cross-language Java patch application when JDK is available.
-- Push to `main` triggers debug Android and Windows EXE builds in GitHub Actions; tag publishing uses a separate signed release workflow.
-- Manually test installation, upgrades, recovery, offline LAN file sharing and disk capacity on real Windows and Android devices before public release.
-
-CI and GitHub services are free within GitHub's plan limits; app updates require an Internet connection **only for the download**, not for everyday local transfer.
+SHA-256 validates bytes against the release metadata; it is not a publisher
+signature. Android also enforces signing-key continuity. Windows currently has
+no publisher-trusted Authenticode certificate. Physical-device installation,
+network and recovery acceptance remains separate from a green CI build.
