@@ -4,6 +4,17 @@ on:
   push:
     branches:
       - dev/native-5ghz-20261016
+    paths:
+      - 'desktop/**'
+      - 'android/**'
+      - 'installer/**'
+      - 'assets/**'
+      - 'nerqo/**'
+      - 'web/**'
+      - 'app.py'
+      - 'tests/**'
+      - 'tools/**'
+      - '.github/workflows/**'
   pull_request:
     paths:
       - 'desktop/**'
