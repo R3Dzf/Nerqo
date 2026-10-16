@@ -35,6 +35,15 @@ internal sealed class UploadRecord
     public string Name { get; set; } = "";
     public long Size { get; set; }
     public long Offset { get; set; }
+    public string FolderId { get; set; } = "";
+    public string RelativePath { get; set; } = "";
+}
+internal sealed class FolderRecord
+{
+    public string Owner { get; set; } = "";
+    public string Name { get; set; } = "";
+    public string DirectoryName { get; set; } = "";
+    public DateTimeOffset Created { get; set; } = DateTimeOffset.UtcNow;
 }
 public sealed record PairedDevice(string TokenHash, string Name, DateTimeOffset Expires);
 internal sealed class PeerRecord
@@ -46,6 +55,7 @@ internal sealed class PersistedData
 {
     public Dictionary<string, PeerRecord> Peers { get; set; } = new();
     public Dictionary<string, UploadRecord> Uploads { get; set; } = new();
+    public Dictionary<string, FolderRecord> Folders { get; set; } = new();
     public List<TransferItem> Items { get; set; } = new();
 }
 
@@ -116,7 +126,11 @@ public sealed class LanHost : IAsyncDisposable
         tlsCertificate = LanIdentity.LoadOrCreate(root);
         string data = Path.Combine(root, "state.json");
         if (File.Exists(data))
-            try { state = JsonSerializer.Deserialize<PersistedData>(File.ReadAllText(data)) ?? new(); }
+            try
+            {
+                state = JsonSerializer.Deserialize<PersistedData>(File.ReadAllText(data)) ?? new();
+                state.Folders ??= new();
+            }
             catch (JsonException) { throw new IOException("Cannot safely load saved Nerqo state; restore state.json from backup."); }
     }
     private void Save()
@@ -140,6 +154,49 @@ public sealed class LanHost : IAsyncDisposable
         if (!OperatingSystem.IsWindows() || !CreateHardLink(target, source, IntPtr.Zero))
             File.Copy(source, target);
     }
+    // Paths coming from an Android document provider are ALWAYS relative to a
+    // server-created folder. Reject Windows device paths, traversal, and aliases.
+    internal static string ValidFolderPath(string? raw)
+    {
+        if (string.IsNullOrEmpty(raw) || raw.Length > 2048 || raw.Contains('\\')
+            || raw.StartsWith('/') || raw.EndsWith('/'))
+            throw new BadHttpRequestException("Invalid relative folder path", 400);
+        string[] segments = raw.Split('/');
+        if (segments.Length > 64) throw new BadHttpRequestException("Folder nesting too deep", 400);
+        foreach (string segment in segments)
+        {
+            ValidName(segment);
+            if (segment.Length > 190 || segment != segment.TrimEnd(' ', '.')
+                || segment.Any(c => char.IsControl(c)))
+                throw new BadHttpRequestException("Unsafe folder name", 400);
+            string stem = segment.Split('.')[0].ToUpperInvariant();
+            if (stem is "CON" or "PRN" or "AUX" or "NUL"
+                || Regex.IsMatch(stem, @"^(COM|LPT)[1-9]$"))
+                throw new BadHttpRequestException("Reserved Windows device name", 400);
+        }
+        return raw;
+    }
+
+    // Only the server creates these paths, and each part is rechecked against
+    // reparse-point redirects. Never trust a peer-provided absolute target.
+    private string ResolveFolderPath(FolderRecord folder, string relative, bool directory)
+    {
+        string safe = ValidFolderPath(relative);
+        string basePath = Path.Combine(ReceivedDirectory, folder.DirectoryName);
+        string current = basePath;
+        string[] segments = safe.Split('/');
+        int parentCount = directory ? segments.Length : segments.Length - 1;
+        for (int i = 0; i < parentCount; i++)
+        {
+            current = Path.Combine(current, segments[i]);
+            if (Directory.Exists(current)
+                && (File.GetAttributes(current) & FileAttributes.ReparsePoint) != 0)
+                throw new BadHttpRequestException("Folder contains a redirected directory", 400);
+            Directory.CreateDirectory(current);
+        }
+        return directory ? current : Path.Combine(current, segments[^1]);
+    }
+
     private static string Hex(byte[] bytes) => Convert.ToHexString(bytes).ToLowerInvariant();
     private static string Digest(string secret) => Hex(SHA256.HashData(Encoding.UTF8.GetBytes(secret)));
     private static string Id() => Hex(RandomNumberGenerator.GetBytes(16));
@@ -244,6 +301,49 @@ public sealed class LanHost : IAsyncDisposable
             lock (gate) { state.Items.Add(item); Save(); }
             return Results.Json(new { id = item.Id }, statusCode: 201);
         });
+        app.MapPost("/api/folders/begin", async (HttpContext ctx) =>
+        {
+            if (Authorize(ctx) == null) return Unauthorized();
+            using var doc = await ReadJson(ctx.Request, ctx.RequestAborted);
+            string name = ValidName(Str(doc.RootElement, "name"));
+            ValidFolderPath(name);
+            string owner = Digest(Bearer(ctx)!);
+            string? resume = Str(doc.RootElement, "resumeId");
+            lock (gate)
+            {
+                if (resume != null)
+                {
+                    if (!state.Folders.TryGetValue(resume, out var existing)
+                        || existing.Owner != owner || existing.Name != name
+                        || !Directory.Exists(Path.Combine(ReceivedDirectory, existing.DirectoryName)))
+                        return Results.Conflict();
+                    return Results.Json(new { id = resume, name = existing.Name });
+                }
+                string id = Id();
+                string directoryName = name + " (" + id[..8] + ")";
+                Directory.CreateDirectory(Path.Combine(ReceivedDirectory, directoryName));
+                state.Folders[id] = new FolderRecord
+                {
+                    Owner = owner, Name = name, DirectoryName = directoryName
+                };
+                Save();
+                return Results.Json(new { id, name });
+            }
+        });
+        app.MapPost("/api/folders/{id}/directory", async (string id, HttpContext ctx) =>
+        {
+            if (Authorize(ctx) == null) return Unauthorized();
+            ValidId(id);
+            using var doc = await ReadJson(ctx.Request, ctx.RequestAborted);
+            string relative = ValidFolderPath(Str(doc.RootElement, "path"));
+            lock (gate)
+            {
+                if (!state.Folders.TryGetValue(id, out var folder)
+                    || folder.Owner != Digest(Bearer(ctx)!)) return Results.StatusCode(403);
+                ResolveFolderPath(folder, relative, true);
+            }
+            return Results.Json(new { ok = true });
+        });
         app.MapPost("/api/transfers/begin", async (HttpContext ctx) =>
         {
             var peer = Authorize(ctx); if (peer == null) return Unauthorized();
@@ -252,12 +352,24 @@ public sealed class LanHost : IAsyncDisposable
             long size = Number(doc.RootElement, "size");
             if (size < 0 || size > MaxFile) return Results.BadRequest();
             string? resume = Str(doc.RootElement, "resumeId");
+            string folderId = Str(doc.RootElement, "folderId") ?? "";
+            string relative = Str(doc.RootElement, "relativePath") ?? "";
+            if (folderId.Length > 0)
+            {
+                ValidId(folderId);
+                relative = ValidFolderPath(relative);
+                if (relative.Split('/')[^1] != name) return Results.BadRequest();
+            }
+            else if (!string.IsNullOrEmpty(relative)) return Results.BadRequest();
             string owner = Digest(Bearer(ctx)!);
             lock (gate)
             {
+                if (folderId.Length > 0
+                    && (!state.Folders.TryGetValue(folderId, out var folder) || folder.Owner != owner))
+                    return Results.StatusCode(403);
                 if (resume != null && state.Uploads.TryGetValue(resume, out var existing))
                 {
-                    if (existing.Owner != owner || existing.Name != name || existing.Size != size) return Results.Conflict();
+                    if (existing.Owner != owner || existing.Name != name || existing.Size != size || existing.FolderId != folderId || existing.RelativePath != relative) return Results.Conflict();
                     string part = Part(resume);
                     if (!File.Exists(part)) return Results.Conflict();
                     existing.Offset = Math.Min(existing.Offset, new FileInfo(part).Length);
@@ -266,7 +378,7 @@ public sealed class LanHost : IAsyncDisposable
                     return Results.Json(new { id = existing.Id, offset = existing.Offset, size = existing.Size });
                 }
                 string id = Id(); File.WriteAllBytes(Part(id), Array.Empty<byte>());
-                state.Uploads[id] = new UploadRecord { Id = id, Owner = owner, Name = name, Size = size };
+                state.Uploads[id] = new UploadRecord { Id = id, Owner = owner, Name = name, Size = size, FolderId = folderId, RelativePath = relative };
                 Save(); return Results.Json(new { id, offset = 0L, size });
             }
         });
@@ -300,14 +412,28 @@ public sealed class LanHost : IAsyncDisposable
             lock (gate)
             {
                 if (!state.Uploads.TryGetValue(id, out var t) || t.Owner != Digest(Bearer(ctx)!) || t.Offset != t.Size || new FileInfo(Part(id)).Length != t.Size) return Results.Conflict();
+                string target;
+                if (t.FolderId.Length > 0)
+                {
+                    if (!state.Folders.TryGetValue(t.FolderId, out var folder)
+                        || folder.Owner != t.Owner) return Results.StatusCode(403);
+                    target = ResolveFolderPath(folder, t.RelativePath, false);
+                    if (File.Exists(target) || Directory.Exists(target)) return Results.Conflict();
+                }
+                else target = UniqueReceivedName(t.Name);
                 string finalPath = Path.Combine(StorageDirectory, id + ".bin");
                 File.Move(Part(id), finalPath);
+                try { LinkOrCopy(finalPath, target); }
+                catch
+                {
+                    if (File.Exists(finalPath)) File.Move(finalPath, Part(id));
+                    throw;
+                }
                 string hash; using (var read = File.OpenRead(finalPath)) hash = Hex(SHA256.HashData(read));
-                var item = new TransferItem { Id = id, Kind = "file", Sender = peer.Name, Content = t.Name, Size = t.Size, Sha256 = hash };
+                var item = new TransferItem { Id = id, Kind = "file", Sender = peer.Name,
+                    Content = t.FolderId.Length > 0 ? t.RelativePath : t.Name,
+                    Size = t.Size, Sha256 = hash };
                 state.Items.Add(item); state.Uploads.Remove(id); Save();
-                // Explicit file copy makes the received file accessible to the Windows user.
-                string target = UniqueReceivedName(t.Name);
-                LinkOrCopy(finalPath, target);
                 return Results.Json(new { id, name = t.Name, size = t.Size, sha256 = hash });
             }
         });

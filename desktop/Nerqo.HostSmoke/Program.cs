@@ -180,6 +180,48 @@ try
 }
 finally { if (Directory.Exists(sampleFolder)) Directory.Delete(sampleFolder, true); }
 
+
+// Direct folder transport: create a folder and nested/empty directories, send a file
+// by its validated relative path, and ensure no ZIP or second staging archive exists.
+var folderStart = await client.PostAsJsonAsync("/api/folders/begin",
+    new { name = "DirectPhotos" });
+folderStart.EnsureSuccessStatusCode();
+string folderId = (await folderStart.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetString()!;
+var createEmpty = await client.PostAsJsonAsync($"/api/folders/{folderId}/directory",
+    new { path = "nested/empty" });
+createEmpty.EnsureSuccessStatusCode();
+foreach (var attack in new[] { "../escape", "nested/../../escape", "C:/absolute", "nested/CON",
+                                "nested/trailing. ", "/absolute", "nested\\evil", "nested//bad" })
+{
+    var attempt = await client.PostAsJsonAsync($"/api/folders/{folderId}/directory", new { path = attack });
+    if (attempt.IsSuccessStatusCode) throw new Exception("Unsafe folder path accepted: " + attack);
+}
+var folderPayload = Encoding.UTF8.GetBytes("Direct folder transfer without ZIP");
+var folderFileBegin = await client.PostAsJsonAsync("/api/transfers/begin",
+    new { name = "photo.txt", size = folderPayload.Length, folderId, relativePath = "nested/photo.txt" });
+folderFileBegin.EnsureSuccessStatusCode();
+string folderFileId = (await folderFileBegin.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetString()!;
+using (var folderPart = new ByteArrayContent(folderPayload))
+{
+    folderPart.Headers.Add("X-Offset", "0");
+    folderPart.Headers.Add("X-SHA256", Convert.ToHexString(SHA256.HashData(folderPayload)).ToLowerInvariant());
+    (await client.PutAsync($"/api/transfers/{folderFileId}/chunk", folderPart)).EnsureSuccessStatusCode();
+}
+(await client.PostAsJsonAsync($"/api/transfers/{folderFileId}/finish", new {})).EnsureSuccessStatusCode();
+var directParent = Directory.GetDirectories(host.ReceivedDirectory, "DirectPhotos (*)").Single();
+var directFile = Path.Combine(directParent, "nested", "photo.txt");
+if (!File.Exists(directFile) || !folderPayload.SequenceEqual(await File.ReadAllBytesAsync(directFile)))
+    throw new Exception("Direct folder file not found with original relative path");
+if (!Directory.Exists(Path.Combine(directParent, "nested", "empty")))
+    throw new Exception("Empty nested directory lost");
+var otherStart = await client.PostAsJsonAsync("/api/folders/begin", new { name = "AnotherFolder" });
+otherStart.EnsureSuccessStatusCode();
+string otherId = (await otherStart.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetString()!;
+var wrongFolder = await client.PostAsJsonAsync("/api/transfers/begin",
+    new { name = "photo.txt", size = folderPayload.Length, folderId = otherId,
+          relativePath = "photo.txt", resumeId = folderFileId });
+if (wrongFolder.IsSuccessStatusCode) throw new Exception("Cross-folder transfer identity reuse accepted");
+
 var devices = host.PairedDevices;
 if (devices.Count == 0 || !host.RevokePeer(devices[0].TokenHash)) throw new Exception("Cannot revoke paired device");
 if ((await client.GetAsync("/api/items")).StatusCode != System.Net.HttpStatusCode.Unauthorized) throw new Exception("Revoked token still works");
