@@ -85,3 +85,11 @@ jobs:
         with:
           name: Nerqo-Native-Android-Debug-Preview
           path: android/app/build/outputs/apk/debug/*.apk
+      - name: Export SDK signer for private release signing
+        run: |
+          mkdir -p dist/SigningTool
+          cp "$ANDROID_HOME/build-tools/36.0.0/lib/apksigner.jar" dist/SigningTool/apksigner.jar
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Nerqo-Android-Signing-Tool
+          path: dist/SigningTool/apksigner.jar

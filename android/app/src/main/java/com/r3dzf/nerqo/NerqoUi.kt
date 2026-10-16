@@ -15,6 +15,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -192,7 +194,7 @@ private fun bytes(size: Long): String = when {
                     item { Panel {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) { Title("Appearance"); Caption("Use a softer dark palette.") }
-                            Switch(checked = darkMode, onCheckedChange = onTheme, modifier = Modifier.padding(start = 8.dp))
+                            Switch(checked = darkMode, onCheckedChange = onTheme, modifier = Modifier.padding(start = 8.dp).semantics { contentDescription = "Dark appearance" })
                         }
                     } }
                     item { Panel {

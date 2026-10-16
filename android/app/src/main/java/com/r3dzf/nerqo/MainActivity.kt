@@ -110,7 +110,7 @@ class MainActivity : ComponentActivity() {
         if (busy) return
         busy = true
         executor.execute {
-            try { action() }
+            try { bindLocalNetwork(); action() }
             catch (e: Exception) { runOnUiThread { if (e is IOException) connected = false; message = e.message ?: "Connection failed" } }
             finally { runOnUiThread { busy = false; progress = 0f } }
         }
@@ -123,7 +123,7 @@ class MainActivity : ComponentActivity() {
             }
             // Some offline Wi-Fi connections are not Android's default network.
             // Bind only while this transfer app is active; restore on exit.
-            if (wifi != null) cm.bindProcessToNetwork(wifi)
+            cm.bindProcessToNetwork(wifi)
         } catch (_: Exception) { }
     }
     private fun scan() = task {
