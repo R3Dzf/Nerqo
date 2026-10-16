@@ -81,7 +81,9 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: Nerqo-Windows-Upgrade-Verification
-          path: dist/qa/windows-upgrade.txt
+          path: |
+            dist/qa/windows-upgrade.txt
+            dist/qa/windows-delta-budget.json
       - uses: actions/upload-artifact@v4
         with:
           name: Nerqo-Native-Windows-Setup-Preview

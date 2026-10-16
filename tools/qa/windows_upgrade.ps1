@@ -7,9 +7,10 @@ $installPath = Join-Path $env:LOCALAPPDATA 'Programs\Nerqo-Upgrade-Smoke'
 $dataRoot = Join-Path $env:LOCALAPPDATA 'Nerqo'
 $appPath = Join-Path $installPath 'Nerqo.exe'
 $appProcess = $null
-function Install-Nerqo([string]$installer) {
+function Install-Nerqo([string]$installer, [switch]$ReusePrevious) {
     $resolved = (Resolve-Path -LiteralPath $installer).Path
-    $installerArguments = "/SP- /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /NORESTARTAPPLICATIONS /DIR=`"$installPath`""
+    $installerArguments = "/SP- /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /NORESTARTAPPLICATIONS"
+    if (-not $ReusePrevious) { $installerArguments += " /DIR=`"$installPath`"" }
     Write-Host "Installing: $resolved"
     $setup = Start-Process -FilePath $resolved -ArgumentList $installerArguments -PassThru
     if (-not $setup.WaitForExit(120000)) {
@@ -63,7 +64,7 @@ try {
     # Upgrade with the actual old receiver still running; Restart Manager must close it.
     $oldProcess = $script:appProcess
     $oldProgram = (Get-FileHash $appPath).Hash
-    Install-Nerqo $NewInstaller
+    Install-Nerqo $NewInstaller -ReusePrevious
     if (-not $oldProcess.WaitForExit(10000)) { throw 'Upgrade left the old receiver running' }
     if ((Get-FileHash $appPath).Hash -eq $oldProgram) { throw 'Old executable was not replaced' }
     $installedEntry = @(Get-ChildItem 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall' | Where-Object {

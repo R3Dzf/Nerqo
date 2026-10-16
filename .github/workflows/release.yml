@@ -91,6 +91,11 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Installer delta budget verification failed' }
       - uses: actions/upload-artifact@v4
         with:
+          name: stable-windows-verification
+          path: dist/qa/windows-*
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
           name: stable-windows-setup
           path: dist/StableWindows/Nerqo-Windows-Setup.exe
           if-no-files-found: error
