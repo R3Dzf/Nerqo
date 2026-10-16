@@ -64,15 +64,16 @@ private fun bytes(size: Long): String = when {
 }
 
 @Composable internal fun NerqoScreen(
+    onHistoryOpen: (HistoryEntry) -> Unit, onHistoryRetry: (HistoryEntry) -> Unit, onHistoryClear: () -> Unit,
     deviceName: String?, connected: Boolean, paired: Boolean, history: List<HistoryEntry>, nearby: List<Device>, entries: List<SharedEntry>,
     busy: Boolean, progress: Float, message: String, network: String, hotspotText: String,
     transfer: TransferUi?, onPause: () -> Unit, onResume: () -> Unit, onCancel: () -> Unit,
     shareText: String, manualIp: String, darkMode: Boolean,
     onShareText: (String) -> Unit, onManualIp: (String) -> Unit, onTheme: (Boolean) -> Unit,
     onScanQr: () -> Unit, onDiscover: () -> Unit, onSelectDevice: (Device) -> Unit,
-    onManualConnect: () -> Unit, onRefresh: () -> Unit, onDisconnect: () -> Unit, onFiles: () -> Unit, onFolder: () -> Unit,
+    onManualConnect: () -> Unit, onRefresh: () -> Unit, onDisconnect: () -> Unit, onReconnect: () -> Unit, onForget: () -> Unit, savedConnection: Boolean, onFiles: () -> Unit, onFolder: () -> Unit,
     onSendText: () -> Unit, onPaste: () -> Unit, onEntry: (SharedEntry) -> Unit,
-    onHotspot: () -> Unit, onWifiSettings: () -> Unit, onUpdates: () -> Unit
+    onHotspot: () -> Unit, preferFiveGHz: Boolean, onFiveGHz: (Boolean) -> Unit, onStopHotspot: () -> Unit, onWifiSettings: () -> Unit, onUpdates: () -> Unit
 ) {
     var page by rememberSaveable { mutableIntStateOf(if (paired) 0 else 1) }
     var manual by rememberSaveable { mutableStateOf(false) }
@@ -192,7 +193,9 @@ private fun bytes(size: Long): String = when {
                         Caption(if (connected) "Your pinned security identity is verified." else "Open Nerqo on Windows and scan the QR in Devices. Both devices should use the same Wi-Fi or hotspot.")
                         Button(onClick = onScanQr, enabled = !busy, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp)) { Symbol(R.drawable.ic_qr); Spacer(Modifier.width(10.dp)); Text("Scan Wi-Fi / pairing QR") }
                         OutlinedButton(onClick = onDiscover, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("Find nearby computers") }
-                        if (paired) Caption("Disconnect ends device access, keeping Wi-Fi connected. Scan the pairing QR to reconnect; unfinished uploads may need restarting.")
+                        if (savedConnection) Caption("Disconnect pauses access and keeps pairing and transfer checkpoints. Forget removes saved access.")
+                        if (savedConnection && !paired) OutlinedButton(onClick = onReconnect, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("Reconnect") }
+                        if (savedConnection) TextButton(onClick = onForget, enabled = !busy && transfer == null) { Text("Forget computer") }
                         if (paired) OutlinedButton(onClick = onDisconnect, modifier = Modifier.fillMaxWidth()) { Text("Disconnect") }
                         if (paired) TextButton(onClick = { onRefresh(); page = 0 }, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("Open transfers") }
                     } }
@@ -217,6 +220,7 @@ private fun bytes(size: Long): String = when {
                 3 -> {
                     item { Panel {
                         Title("Transfer history")
+                        TextButton(onClick = onHistoryClear) { Text("Clear history") }
                         Caption("File and folder operations on this device. Up to 500 recent records are kept across app restarts. Available shares stay in Transfers.")
                         OutlinedTextField(value = historyQuery, onValueChange = { historyQuery = it }, label = { Text("Search history") }, singleLine = true, modifier = Modifier.fillMaxWidth())
                         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -236,6 +240,10 @@ private fun bytes(size: Long): String = when {
                         Text(entry.status, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
                         Caption(entry.direction + " · " + entry.peer + " · " + java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.SHORT, java.text.DateFormat.SHORT).format(java.util.Date(entry.updated)))
                         if (entry.detail.isNotBlank()) Caption(entry.detail)
+                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            if (entry.status == "Completed" && entry.direction == "Received" && entry.job.isNotBlank()) TextButton(onClick = { onHistoryOpen(entry) }) { Text("Open saved file") }
+                            if (entry.status in listOf("Paused", "Interrupted", "Cancelled") && entry.job.isNotBlank()) TextButton(onClick = { onHistoryRetry(entry) }, enabled = !busy) { Text("Retry / resume") }
+                        }
                     } }
                 }
                 else -> {
@@ -259,15 +267,16 @@ private fun bytes(size: Long): String = when {
                     } }
                     item { Panel {
                         Title("Or use your phone as the hotspot")
-                        Caption("Create an offline hotspot and join it on Windows. Android chooses the available band.")
+                        Caption("Create an offline hotspot and join it on Windows. Auto works on supported phones; in-app 5 GHz requires Android 16 and compatible hardware.")
+                        Row(verticalAlignment = Alignment.CenterVertically) { Switch(checked = preferFiveGHz, onCheckedChange = onFiveGHz, enabled = !busy); Text("Request 5 GHz", modifier = Modifier.padding(start = 10.dp)) }
                         OutlinedButton(onClick = onHotspot, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("Create offline hotspot") }
-                        if (hotspotText.isNotBlank()) Text(hotspotText, color = MaterialTheme.colorScheme.primary, fontSize = 13.sp)
+                        if (hotspotText.isNotBlank()) { Text(hotspotText, color = MaterialTheme.colorScheme.primary, fontSize = 13.sp); TextButton(onClick = onStopHotspot, enabled = !busy) { Text("Stop hotspot") } }
                     } }
                     item { Panel {
                         Title("Keep Nerqo up to date")
                         Caption("Updates use the internet. Your local transfers work offline.")
                         Button(onClick = onUpdates, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("Check for app updates") }
-                        Caption("Nerqo 1.0.8 · Windows + Android")
+                        Caption("Nerqo 1.0.9 · Windows + Android")
                     } }
                 }
             }

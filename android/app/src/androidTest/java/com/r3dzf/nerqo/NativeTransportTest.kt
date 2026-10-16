@@ -51,6 +51,23 @@ class NativeTransportTest {
         assertEquals("Completed", loaded.single().status)
         assertEquals("Received", loaded.single().direction)
     }
+    @Test fun test00ForegroundServiceIsPrivateDataSync() {
+        val info = context.packageManager.getServiceInfo(android.content.ComponentName(context, TransferService::class.java), 0)
+        assertFalse(info.exported)
+        assertEquals(android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC, info.foregroundServiceType)
+    }
+    @Test fun test00ReceiptOutboxSurvivesMissingTokenAndAcknowledgesOnceConnected() {
+        val entry = SharedEntry("1".repeat(32), "file", device.name, "receipt.bin", data.size.toLong(), hash(data))
+        val job = TransferJob(kind = "downloadFile", title = "receipt", host = device.address, port = device.port, deviceName = device.name, fingerprint = fingerprint, entry = entry)
+        val prefs = context.getSharedPreferences("nerqo_native", 0)
+        prefs.edit().putString("cert_${device.address}:${device.port}", fingerprint).remove("token_${device.address}").commit()
+        ReceiptOutbox.enqueue(context, job); ReceiptOutbox.enqueue(context, job)
+        ReceiptOutbox.flush(context)
+        assertTrue(context.getSharedPreferences("nerqo_receipts", 0).contains(job.id))
+        prefs.edit().putString("token_${device.address}", token).commit()
+        ReceiptOutbox.flush(context)
+        assertFalse(context.getSharedPreferences("nerqo_receipts", 0).contains(job.id))
+    }
     @Test fun test00ScannerIsPortraitAndPrivate() {
         val info = context.packageManager.getActivityInfo(android.content.ComponentName(context, PortraitCaptureActivity::class.java), 0)
         assertEquals(android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT, info.screenOrientation)

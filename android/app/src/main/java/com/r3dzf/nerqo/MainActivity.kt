@@ -52,14 +52,13 @@ class MainActivity : ComponentActivity() {
         val content = result.contents
         if (content != null) { if (content.startsWith("WIFI:")) joinWifiQr(content) else pairFromQr(content) }
     }
-    private var requestedWifi: android.net.Network? = null
-    private var wifiRequest: ConnectivityManager.NetworkCallback? = null
     private var pendingWifiQr: String? = null
     private var sessionGeneration = 0
     private var polling = false
     private val executor = Executors.newSingleThreadExecutor()
-    private val receiptExecutor = Executors.newSingleThreadExecutor()
-    private var history by mutableStateOf<List<HistoryEntry>>(emptyList())
+    private var history: List<HistoryEntry>
+        get() = TransferRuntime.history
+        set(value) { TransferRuntime.history = value }
     private var connected by mutableStateOf(false)
     private var darkMode by mutableStateOf(false)
     private var device by mutableStateOf<Device?>(null)
@@ -67,19 +66,25 @@ class MainActivity : ComponentActivity() {
     private var nearby by mutableStateOf<List<Device>>(emptyList())
     private var entries by mutableStateOf<List<SharedEntry>>(emptyList())
     private var message by mutableStateOf("Find your Windows device to start")
-    private var busy by mutableStateOf(false)
+    private var operationBusy by mutableStateOf(false)
+    private var busy: Boolean
+        get() = operationBusy || TransferRuntime.running
+        set(value) { operationBusy = value }
     private var progress by mutableFloatStateOf(0f)
-    private var pendingTransfer by mutableStateOf<TransferJob?>(null)
-    private var transferUi by mutableStateOf<TransferUi?>(null)
-    private var transferControl: TransferControl? = null
+    private var pendingTransfer: TransferJob?
+        get() = TransferRuntime.job
+        set(value) { TransferRuntime.job = value }
+    private var transferUi: TransferUi?
+        get() = TransferRuntime.ui
+        set(value) { TransferRuntime.ui = value }
+    private val transferControl get() = TransferRuntime.control
     private var shareText by mutableStateOf("")
     private var manualIp by mutableStateOf("")
     private var pinText by mutableStateOf("")
     private var showPair by mutableStateOf(false)
     private var previewFingerprint by mutableStateOf("")
     private var fingerprintConfirmed by mutableStateOf(false)
-    private var hotspotText by mutableStateOf("")
-    private var hotspotReservation: WifiManager.LocalOnlyHotspotReservation? = null
+    private val hotspotText get() = LocalNetwork.hotspotText
     private var pendingDownload: SharedEntry? = null
     private var pendingFolderDownload: SharedEntry? = null
     private val prefs by lazy { getSharedPreferences("nerqo_native", MODE_PRIVATE) }
@@ -87,8 +92,8 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         darkMode = prefs.getBoolean("dark_mode", false)
         history = TransferHistory.load(this)
-        pendingTransfer = TransferJob.load(this)
-        pendingTransfer?.let {
+        TransferRuntime.restore(this)
+        pendingTransfer?.takeIf { !TransferRuntime.running }?.let {
             transferUi = TransferUi(it.title, paused = true, detail = "Interrupted transfer · Ready to resume")
             if (history.none { entry -> entry.id == it.id && entry.status == "Completed" }) rememberTransfer(it, "Paused", "Restored after app restart")
         }
@@ -98,12 +103,16 @@ class MainActivity : ComponentActivity() {
             device = Device(prefs.getString("name", "Windows PC") ?: "Windows PC", host, storedPort)
             token = prefs.getString("token_$host", null)
             val storedCertificate = prefs.getString("cert_${host}:$storedPort", null)
-            if (storedCertificate != null) NativeClient.trustIdentity(device!!, storedCertificate)
+            if (storedCertificate != null) {
+                NativeClient.trustIdentity(device!!, storedCertificate)
+                token?.let { prefs.edit().putString("saved_identity", storedCertificate).putString("saved_token", it).apply() }
+            }
             else token = null
         }
         bindLocalNetwork()
         receiveShare(intent)
         setContent { NativeScreen() }
+        if (prefs.getBoolean("disconnected", false)) token = null
         if (device != null && token != null) refresh()
         scan()
     }
@@ -127,25 +136,14 @@ class MainActivity : ComponentActivity() {
     private fun task(action: () -> Unit) {
         if (busy) return
         busy = true
+        TransferRuntime.message = ""
         executor.execute {
             try { bindLocalNetwork(); action() }
             catch (e: Exception) { runOnUiThread { if (e is IOException) connected = false; message = e.message ?: "Connection failed" } }
             finally { runOnUiThread { busy = false; progress = 0f } }
         }
     }
-    private fun bindLocalNetwork() {
-        try {
-            val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-            if (hotspotReservation != null) { cm.bindProcessToNetwork(null); return }
-            requestedWifi?.let { cm.bindProcessToNetwork(it); return }
-            val wifi = cm.allNetworks.firstOrNull { network ->
-                cm.getNetworkCapabilities(network)?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
-            }
-            // Some offline Wi-Fi connections are not Android's default network.
-            // Bind only while this transfer app is active; restore on exit.
-            cm.bindProcessToNetwork(wifi)
-        } catch (_: Exception) { }
-    }
+    private fun bindLocalNetwork() { runCatching { LocalNetwork.bind(this) } }
     private fun scan() = task {
         bindLocalNetwork()
         runOnUiThread { message = "Finding devices on local Wi-Fi…" }
@@ -156,7 +154,7 @@ class MainActivity : ComponentActivity() {
         }
     }
     private fun select(found: Device) {
-        if (pendingTransfer != null) { message = "Resume or cancel the transfer before changing computers"; return }
+        if (TransferRuntime.running) { message = "Pause the transfer before reconnecting"; return }
         device = found
         connected = false
         token = null
@@ -167,9 +165,24 @@ class MainActivity : ComponentActivity() {
         task {
             val discovered = NativeClient.previewIdentity(found)
             val stored = prefs.getString("cert_${found.address}:${found.port}", null)
+                ?: prefs.getString("saved_identity", null)
             if (stored != null && stored == discovered) {
                 NativeClient.trustIdentity(found, stored)
-                val access = prefs.getString("token_${found.address}", null)
+                val access = prefs.getString("token_${found.address}", null) ?: if (prefs.getString("saved_identity", null) == discovered) prefs.getString("saved_token", null) else null
+                if (pendingTransfer != null && pendingTransfer!!.fingerprint != discovered) throw IOException("Saved transfer belongs to another computer")
+                if (access != null) try { NativeClient.reconnect(found, access) } catch (_: PairingExpiredException) {
+                    prefs.edit().remove("token_${found.address}").remove("saved_token").apply()
+                    runOnUiThread { previewFingerprint = discovered; showPair = true; message = "Pairing expired. Verify identity and pair again." }
+                    return@task
+                }
+                if (access != null) {
+                    prefs.edit().putString("cert_${found.address}:${found.port}", discovered).putString("token_${found.address}", access)
+                        .putBoolean("disconnected", false).apply()
+                    pendingTransfer?.let { previous ->
+                        val moved = previous.copy(host = found.address, port = found.port); moved.save(this)
+                        runOnUiThread { pendingTransfer = moved }
+                    }
+                }
                 val fresh = try { if (access != null) NativeClient.list(found, access) else emptyList() }
                     catch (_: PairingExpiredException) { prefs.edit().remove("token_${found.address}").apply(); emptyList() }
                 val approvedToken = if (access != null && prefs.getString("token_${found.address}", null) == access) access else null
@@ -193,7 +206,7 @@ class MainActivity : ComponentActivity() {
             NativeClient.trustIdentity(current, confirmedIdentity)
             val saved = NativeClient.pair(current, pinText)
             prefs.edit().putString("cert_${current.address}:${current.port}", confirmedIdentity)
-                .putString("token_${current.address}", saved).apply()
+                .putString("token_${current.address}", saved).putString("saved_identity", confirmedIdentity).putString("saved_token", saved).putBoolean("disconnected", false).apply()
             runOnUiThread { connected = true; token = saved; showPair = false; pinText = ""; fingerprintConfirmed = false; message = "Securely paired with ${current.name}" }
             val fresh = NativeClient.list(current, saved)
             runOnUiThread { entries = fresh }
@@ -210,6 +223,7 @@ class MainActivity : ComponentActivity() {
             try {
                 bindLocalNetwork()
                 val fresh = NativeClient.list(d, access)
+                ReceiptOutbox.flush(this)
                 runOnUiThread {
                     if (generation == sessionGeneration && !isDestroyed) {
                         connected = true
@@ -217,6 +231,9 @@ class MainActivity : ComponentActivity() {
                         if (!silent) message = "Connected to ${d.name}"
                     }
                 }
+            } catch (_: ConnectionPausedException) {
+                prefs.edit().putBoolean("disconnected", true).apply()
+                runOnUiThread { if (generation == sessionGeneration && !isDestroyed) { token = null; connected = false; entries = emptyList(); message = "Disconnected. Choose Reconnect to continue." } }
             } catch (_: PairingExpiredException) {
                 prefs.edit().remove("token_${d.address}").apply()
                 runOnUiThread { if (generation == sessionGeneration && !isDestroyed) {
@@ -239,12 +256,29 @@ class MainActivity : ComponentActivity() {
         sessionGeneration++
         transferControl?.interrupt(TransferStop.PAUSE, closeAsync = true)
         connected = false; token = null; entries = emptyList(); showPair = false
-        prefs.edit().remove("token_${d.address}").apply()
+        prefs.edit().putBoolean("disconnected", true).apply()
         message = "Disconnected. Any unfinished transfer is saved. Wi-Fi stays connected."
         executor.execute {
             // Best effort server revocation; local disconnect always succeeds, even offline.
             runCatching { bindLocalNetwork(); NativeClient.disconnect(d, access) }
         }
+    }
+    private fun reconnect() {
+        val current = device ?: return
+        select(current)
+    }
+    private fun forget() {
+        val current = device ?: return
+        AlertDialog.Builder(this).setTitle("Forget this computer?")
+            .setMessage("Saved access will be removed. Pair again with the Windows QR. Cancel unfinished transfers first.")
+            .setNegativeButton("Keep", null).setPositiveButton("Forget") { _, _ ->
+                if (pendingTransfer != null || busy) { message = "Cancel the saved transfer before forgetting this computer"; return@setPositiveButton }
+                val old = prefs.getString("token_${current.address}", null)
+                prefs.edit().remove("token_${current.address}").remove("saved_token").remove("saved_identity").remove("host").apply()
+                token = null; connected = false; device = null; entries = emptyList()
+                if (old != null) executor.execute { runCatching { NativeClient.forget(current, old) } }
+                message = "Computer forgotten. Pair again to restore access."
+            }.show()
     }
     private fun sendText() {
         val d = device ?: return
@@ -289,12 +323,36 @@ class MainActivity : ComponentActivity() {
         catch (error: Exception) { message = error.message ?: "Could not save transfer" }
     }
     private fun submitFiles(uris: List<Uri>) {
-        if (uris.isNotEmpty()) createTransfer("uploadFiles", "Send ${uris.size} file(s) to Windows", uris)
+        fun name(uri: Uri): String = runCatching {
+            contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c -> if (c.moveToFirst()) c.getString(0) else null }
+        }.getOrNull() ?: "file"
+        if (uris.isNotEmpty()) createTransfer("uploadFiles", uris.take(3).joinToString(", ") { name(it) } + if (uris.size > 3) " +${uris.size - 3} more" else "", uris)
     }
-    private fun submitFolder(treeUri: Uri) = createTransfer("uploadFolder", "Send folder to Windows", listOf(treeUri))
+    private fun submitFolder(treeUri: Uri) = createTransfer("uploadFolder", "Send folder: " + (androidx.documentfile.provider.DocumentFile.fromTreeUri(this, treeUri)?.name ?: "folder"), listOf(treeUri))
     private fun download(entry: SharedEntry, target: Uri) = createTransfer("downloadFile", "Save " + entry.content, target = target, entry = entry)
     private fun receiveFolder(entry: SharedEntry, target: Uri) = createTransfer("downloadFolder", "Save folder: " + entry.content, target = target, entry = entry)
 
+    private fun clearHistory() {
+        AlertDialog.Builder(this).setTitle("Clear transfer history?").setMessage("Your files and current transfer are kept.")
+            .setNegativeButton("Keep", null).setPositiveButton("Clear history") { _, _ ->
+                if (TransferHistory.clear(this)) history = emptyList() else message = "Could not clear history"
+            }.show()
+    }
+    private fun openHistory(entry: HistoryEntry) {
+        val job = TransferJob.decode(entry.job) ?: return
+        if (job.target.isBlank()) { message = "This operation has no saved destination on this phone"; return }
+        try { startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(Uri.parse(job.target), "*/*").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)) }
+        catch (_: Exception) { message = "No app can open this saved document. Use your Files app." }
+    }
+    private fun retryHistory(entry: HistoryEntry) {
+        if (busy || (pendingTransfer != null && pendingTransfer?.id != entry.id)) { message = "Resume or cancel the current transfer first"; return }
+        val job = TransferJob.decode(entry.job) ?: run { message = "Retry details are unavailable for this older entry"; return }
+        val current = device ?: run { message = "Reconnect with Windows first"; return }
+        if (token == null || prefs.getString("cert_${current.address}:${current.port}", null) != job.fingerprint) { message = "Reconnect to the original computer first"; return }
+        val retry = job.copy(host = current.address, port = current.port)
+        try { retry.save(this); pendingTransfer = retry; resumeTransfer() }
+        catch (e: Exception) { message = e.message ?: "Could not retry transfer" }
+    }
     private fun pauseTransfer() {
         transferControl?.interrupt(TransferStop.PAUSE, closeAsync = true)
         transferUi = transferUi?.copy(detail = "Pausing at the last safe checkpoint…")
@@ -311,114 +369,15 @@ class MainActivity : ComponentActivity() {
         }
     }
     private fun resumeTransfer(cancelOnly: Boolean = false) {
-        val job = pendingTransfer ?: return
-        if (busy || isDestroyed) return
-        if (!TransferControl.workerActive.compareAndSet(false, true)) {
-            message = "The previous transfer is still closing. Try Resume again shortly."; return
-        }
-        val control = TransferControl { label ->
-            runOnUiThread { if (!isDestroyed && pendingTransfer?.id == job.id) transferUi = (transferUi ?: TransferUi(job.title)).copy(detail = label) }
-        }
-        transferControl = control
-        busy = true
-        transferUi = TransferUi(job.title, detail = if (cancelOnly) "Cancelling…" else "Checking saved transfer…")
-        executor.execute {
-            val destination = Device(job.deviceName, job.host, job.port)
-            val access = prefs.getString("token_${job.host}", null)
-            rememberTransfer(job, "Running")
-            try {
-                bindLocalNetwork()
-                if (cancelOnly) throw TransferCancelled()
-                require(isPrivateIPv4(job.host) && job.port in 1..65535 && job.nextFile in 0..job.uris.size)
-                require(prefs.getString("cert_${job.host}:${job.port}", null) == job.fingerprint) {
-                    "The computer's security identity changed. Cancel this transfer and pair again."
-                }
-                if (access == null) throw PairingExpiredException()
-                NativeClient.trustIdentity(destination, job.fingerprint)
-                var lastUiUpdate = 0L
-                var sampleTime = System.nanoTime()
-                var sampleBytes = 0L
-                var bytesPerSecond = 0.0
-                var sampleLabel: String? = null
-                fun update(done: Long, total: Long, label: String = "") {
-                    val now = System.nanoTime()
-                    if (sampleLabel != label || done < sampleBytes) {
-                        sampleLabel = label; sampleTime = now; sampleBytes = done; bytesPerSecond = 0.0
-                    }
-                    if (now - sampleTime >= 500_000_000L) {
-                        bytesPerSecond = (done - sampleBytes).coerceAtLeast(0) * 1_000_000_000.0 / (now - sampleTime)
-                        sampleTime = now; sampleBytes = done
-                    }
-                    if (now - lastUiUpdate < 100_000_000L && done != total) return
-                    lastUiUpdate = now
-                    val fraction = if (total <= 0) 0f else (done.toFloat() / total).coerceIn(0f, 1f)
-                    fun bytes(value: Long) = when {
-                        value < 1048576 -> "%.1f KB".format(java.util.Locale.ROOT, value / 1024.0)
-                        value < 1073741824 -> "%.1f MB".format(java.util.Locale.ROOT, value / 1048576.0)
-                        else -> "%.2f GB".format(java.util.Locale.ROOT, value / 1073741824.0)
-                    }
-                    val rate = if (bytesPerSecond > 0) " · " + bytes(bytesPerSecond.toLong()) + "/s" else ""
-                    val seconds = if (bytesPerSecond > 0 && total > done) ((total - done) / bytesPerSecond).toLong() else -1L
-                    val eta = when {
-                        seconds < 0 -> ""
-                        seconds < 60 -> " · ~" + seconds + "s left"
-                        seconds < 3600 -> " · ~" + (seconds / 60) + "m left"
-                        else -> " · ~" + (seconds / 3600) + "h " + ((seconds % 3600) / 60) + "m left"
-                    }
-                    val detail = (if (label.isEmpty()) "" else label + "\n") + bytes(done) + (if (total > 0) " / " + bytes(total) else "") + rate + eta
-                    runOnUiThread { if (!isDestroyed && pendingTransfer?.id == job.id) {
-                        progress = fraction; transferUi = TransferUi(job.title, detail = detail, fraction = fraction)
-                    } }
-                }
-                control.run {
-                    if (job.kind.startsWith("upload") && NativeClient.status(destination).optInt("transferProtocol", 1) < 2)
-                        throw IOException("Update Nerqo on Windows to use safe pause and resume.")
-                    when (job.kind) {
-                        "uploadFiles" -> {
-                            for (index in job.nextFile until job.uris.size) {
-                                control.checkpoint()
-                                NativeClient.sendFile(this, destination, access, Uri.parse(job.uris[index]), sessionId = job.id) { done, total ->
-                                    update(done, total, "File ${index + 1} of ${job.uris.size}")
-                                }
-                                job.nextFile = index + 1; job.save(this)
-                            }
-                        }
-                        "uploadFolder" -> FolderTransfer.send(this, destination, access, Uri.parse(job.uris.single()), job.id) { count, path, done, total ->
-                            update(done, total, "$count entries · $path")
-                        }
-                        "downloadFile" -> NativeClient.download(this, destination, access, job.entry!!, Uri.parse(job.target), job.id) { done, total -> update(done, total) }
-                        "downloadFolder" -> FolderReceiver.receive(this, destination, access, job.entry!!.id, Uri.parse(job.target), job.entry.content, job.id) { count, path, done, total ->
-                            update(done, total, "$count entries · $path")
-                        }
-                        else -> throw IOException("Unknown transfer type")
-                    }
-                }
-                TransferJob.clear(this)
-                rememberTransfer(job, "Completed")
-                if (job.kind.startsWith("download") && job.entry != null) runCatching {
-                    receiptExecutor.execute { runCatching { NativeClient.confirmReception(destination, access, job.entry, job.id) } }
-                }
-                runCatching { NativeClient.cleanSession(this, destination, access, job.id, cancel = false) }
-                runOnUiThread { if (!isDestroyed) { pendingTransfer = null; transferUi = null; message = "Transfer completed and SHA-256 verified" } }
-            } catch (error: Exception) {
-                if (cancelOnly || control.stop == TransferStop.CANCEL || error is TransferCancelled) {
-                    runCatching { NativeClient.cleanSession(this, destination, access, job.id, cancel = true) }
-                    TransferJob.clear(this)
-                    rememberTransfer(job, "Cancelled")
-                    runOnUiThread { if (!isDestroyed) { pendingTransfer = null; transferUi = null; message = "Transfer cancelled. Completed files were kept." } }
-                } else {
-                    val paused = control.stop == TransferStop.PAUSE || error is TransferPaused
-                    rememberTransfer(job, if (paused) "Paused" else "Interrupted", if (paused) "" else error.message ?: "Transfer interrupted")
-                    runOnUiThread { if (!isDestroyed) {
-                        transferUi = (transferUi ?: TransferUi(job.title)).copy(paused = true, detail = if (control.stop == TransferStop.PAUSE || error is TransferPaused) "Paused · Resume from the saved checkpoint" else "Interrupted · " + (error.message ?: "Try again"))
-                        message = "Transfer saved. You can resume it or cancel."
-                    } }
-                }
-            } finally {
-                TransferControl.workerActive.set(false)
-                runOnUiThread { if (!isDestroyed) { busy = false; transferControl = null; progress = 0f } }
+        if (pendingTransfer == null || busy || TransferControl.workerActive.get()) return
+        try {
+            if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+                && !prefs.getBoolean("notification_asked", false)) {
+                prefs.edit().putBoolean("notification_asked", true).apply()
+                requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 482)
             }
-        }
+            startForegroundService(Intent(this, TransferService::class.java).setAction(if (cancelOnly) "cancel" else "resume"))
+        } catch (error: Exception) { message = error.message ?: "Could not start transfer service" }
     }
     private fun isPrivateIPv4(raw: String): Boolean {
         return try {
@@ -466,30 +425,8 @@ class MainActivity : ComponentActivity() {
                     val builder = android.net.wifi.WifiNetworkSpecifier.Builder().setSsid(parsed.ssid).setIsHiddenSsid(parsed.isHidden)
                     if (auth == "WPA3" || auth == "SAE") builder.setWpa3Passphrase(parsed.password ?: "")
                     else builder.setWpa2Passphrase(parsed.password ?: "")
-                    hotspotReservation?.close(); hotspotReservation = null; hotspotText = ""
                     connected = false
-                    val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-                    wifiRequest?.let { cm.unregisterNetworkCallback(it) }
-                    requestedWifi = null
-                    val callback = object : ConnectivityManager.NetworkCallback() {
-                        override fun onAvailable(network: android.net.Network) {
-                            requestedWifi = network; cm.bindProcessToNetwork(network)
-                            runOnUiThread { if (!isDestroyed) message = "Hotspot joined. Now scan the Nerqo pairing QR on Windows." }
-                        }
-                        override fun onUnavailable() {
-                            runOnUiThread { if (!isDestroyed) message = "Wi-Fi connection was declined or unavailable. Retry or use Wi-Fi settings." }
-                        }
-                        override fun onLost(network: android.net.Network) {
-                            if (requestedWifi == network) {
-                                requestedWifi = null; cm.bindProcessToNetwork(null)
-                                runOnUiThread { if (!isDestroyed) { connected = false; message = "Hotspot connection lost. Rejoin the network." } }
-                            }
-                        }
-                    }
-                    wifiRequest = callback
-                    val request = android.net.NetworkRequest.Builder().addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
-                        .removeCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET).setNetworkSpecifier(builder.build()).build()
-                    cm.requestNetwork(request, callback)
+                    LocalNetwork.join(this, builder.build())
                     message = "Approve Android's Wi-Fi connection request."
                 } catch (_: Exception) { message = "Cannot join this hotspot automatically. Use Wi-Fi settings." }
             }.show()
@@ -535,7 +472,7 @@ class MainActivity : ComponentActivity() {
                     prefs.edit().putString("host", candidate.address).putInt("port", candidate.port)
                         .putString("name", candidate.name)
                         .putString("cert_${candidate.address}:${candidate.port}", fp)
-                        .putString("token_${candidate.address}", newToken).apply()
+                        .putString("token_${candidate.address}", newToken).putString("saved_identity", fp).putString("saved_token", newToken).putBoolean("disconnected", false).apply()
                     runOnUiThread {
                         connected = true; device = candidate; token = newToken; entries = newEntries; nearby = listOf(candidate)
                         showPair = false; previewFingerprint = ""; fingerprintConfirmed = false
@@ -564,6 +501,7 @@ class MainActivity : ComponentActivity() {
         @Suppress("DEPRECATION") val speed = info?.linkSpeed ?: -1
         if (speed > 0) "$band  ·  ${speed} Mbps link" else band
     } catch (_: Exception) { "Band unavailable (enable Wi-Fi / location permission)" }
+    private var preferFiveGHz by mutableStateOf(false)
     private fun hotspot() {
         if (Build.VERSION.SDK_INT < 33 && checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION), 479)
@@ -573,39 +511,11 @@ class MainActivity : ComponentActivity() {
             requestPermissions(arrayOf(Manifest.permission.NEARBY_WIFI_DEVICES), 480)
             message = "Grant nearby Wi-Fi permission, then start hotspot again"; return
         }
-        val wifi = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
-        try {
-            hotspotReservation?.close()
-            val callback = object : WifiManager.LocalOnlyHotspotCallback() {
-                override fun onStarted(reservation: WifiManager.LocalOnlyHotspotReservation) {
-                    hotspotReservation = reservation
-                    if (Build.VERSION.SDK_INT >= 30) {
-                        val cfg = reservation.softApConfiguration
-                        hotspotText = "Connect your laptop to ${cfg.ssid}  |  Password: ${cfg.passphrase ?: "See Wi-Fi settings"}"
-                    } else {
-                        @Suppress("DEPRECATION") val cfg = reservation.wifiConfiguration
-                        hotspotText = "Connect laptop to ${cfg?.SSID ?: "the Android hotspot"}  |  Password: ${cfg?.preSharedKey ?: "See Wi-Fi settings"}"
-                    }
-                    message = "Offline hotspot active. Band is chosen by Android/device."
-                }
-                override fun onStopped() { hotspotReservation = null; hotspotText = ""; message = "Hotspot stopped" }
-                override fun onFailed(reason: Int) { hotspotReservation = null; hotspotText = ""; message = "Hotspot unavailable ($reason). Use system hotspot settings." }
-            }
-            // Use Android's generated WPA2/WPA3 credentials. Never create an open AP
-            // just to request a frequency band unsupported by the public API.
-            wifi.startLocalOnlyHotspot(callback, null)
-        } catch (e: Exception) {
-            message = "Hotspot requires device support: ${e.message}"
-            startActivity(Intent(Settings.ACTION_WIRELESS_SETTINGS))
-        }
+        try { LocalNetwork.hotspot(this, preferFiveGHz) }
+        catch (e: Exception) { message = e.message ?: "Hotspot unavailable" }
     }
     override fun onDestroy() {
-        transferControl?.interrupt(TransferStop.PAUSE, closeAsync = true)
-        hotspotReservation?.close()
-        (getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager).bindProcessToNetwork(null)
         pendingWifiQr = null
-        wifiRequest?.let { runCatching { (getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager).unregisterNetworkCallback(it) } }
-        receiptExecutor.shutdownNow()
         executor.shutdownNow()
         super.onDestroy()
     }
@@ -638,16 +548,17 @@ class MainActivity : ComponentActivity() {
         }
         NerqoTheme(darkMode) {
             NerqoScreen(
+                onHistoryOpen = ::openHistory, onHistoryRetry = ::retryHistory, onHistoryClear = ::clearHistory,
                 deviceName = device?.name, connected = connected, paired = token != null, history = history,
                 nearby = nearby, entries = entries, busy = busy, progress = progress,
-                message = message, network = wifiText(), hotspotText = hotspotText,
+                message = if (TransferRuntime.message.isNotBlank()) TransferRuntime.message else message, network = wifiText(), hotspotText = hotspotText,
                 transfer = transferUi, onPause = ::pauseTransfer,
                 onResume = { resumeTransfer() }, onCancel = ::cancelTransfer,
                 shareText = shareText, manualIp = manualIp, darkMode = darkMode,
                 onShareText = { shareText = it }, onManualIp = { manualIp = it },
                 onTheme = { darkMode = it; prefs.edit().putBoolean("dark_mode", it).apply() },
                 onScanQr = ::scanPairQr, onDiscover = ::scan, onSelectDevice = ::select,
-                onManualConnect = ::manualConnect, onRefresh = { refresh() }, onDisconnect = ::disconnect,
+                onManualConnect = ::manualConnect, onRefresh = { refresh() }, onDisconnect = ::disconnect, onReconnect = ::reconnect, onForget = ::forget, savedConnection = device != null,
                 onFiles = { picker.launch(arrayOf("*/*")) }, onFolder = { folderPicker.launch(null) },
                 onSendText = ::sendText, onPaste = {
                     val clipboard = getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager
@@ -663,7 +574,8 @@ class MainActivity : ComponentActivity() {
                             Toast.makeText(this, "Copied", Toast.LENGTH_SHORT).show()
                         }
                     }
-                }, onHotspot = ::hotspot,
+                }, onHotspot = ::hotspot, preferFiveGHz = preferFiveGHz, onFiveGHz = { preferFiveGHz = it },
+                onStopHotspot = { if (!busy) LocalNetwork.stopHotspot() },
                 onWifiSettings = { startActivity(Intent(Settings.ACTION_WIFI_SETTINGS)) },
                 onUpdates = { AppUpdater.check(this) }
             )

@@ -76,6 +76,9 @@ class Handler(BaseHTTPRequestHandler):
         if not self.authenticated(): return
         request = json.loads(self.body() or b'{}')
         route = urlsplit(self.path)
+        if route.path == '/api/receipts':
+            if request.get('id') not in (SINGLE, UI): self.json({}, 400); return
+            self.json({'ok': True}); return
         if route.path == '/api/transfers/begin':
             with lock:
                 if state['published']:

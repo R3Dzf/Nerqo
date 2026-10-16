@@ -69,7 +69,7 @@ internal object FolderReceiver {
             total += length
         }
         val prefs = context.getSharedPreferences("nerqo_folder_receipts", Context.MODE_PRIVATE)
-        val receiptScope = device.endpoint + "|" + id + "|" + root.uri
+        val receiptScope = NativeClient.checkpointEndpoint(device) + "|" + id + "|" + root.uri
         fun receiptKey(path: String) = MessageDigest.getInstance("SHA-256")
             .digest((receiptScope + "|" + path).toByteArray(Charsets.UTF_8))
             .joinToString("") { "%02x".format(it.toInt() and 0xff) }

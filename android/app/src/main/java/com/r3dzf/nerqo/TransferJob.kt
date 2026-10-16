@@ -10,10 +10,11 @@ internal data class TransferJob(
     val id: String = UUID.randomUUID().toString(), val kind: String, val title: String,
     val host: String, val port: Int, val deviceName: String, val fingerprint: String,
     val uris: List<String> = emptyList(), val target: String = "", val entry: SharedEntry? = null,
-    var nextFile: Int = 0
+    var nextFile: Int = 0, val checkpointHost: String = host, val checkpointPort: Int = port
 ) {
     fun json(): JSONObject = JSONObject().put("id", id).put("kind", kind).put("title", title)
         .put("host", host).put("port", port).put("deviceName", deviceName).put("fingerprint", fingerprint)
+        .put("checkpointHost", checkpointHost).put("checkpointPort", checkpointPort)
         .put("uris", JSONArray(uris)).put("target", target).put("nextFile", nextFile).apply {
             entry?.let { put("entry", JSONObject().put("id", it.id).put("kind", it.kind).put("sender", it.sender)
                 .put("content", it.content).put("size", it.size).put("sha256", it.sha256)) }
@@ -26,7 +27,9 @@ internal data class TransferJob(
     companion object {
         fun load(context: Context): TransferJob? {
             val text = context.getSharedPreferences("nerqo_jobs", Context.MODE_PRIVATE).getString("pending", null) ?: return null
-            return runCatching {
+            return decode(text)
+        }
+        fun decode(text: String): TransferJob? = runCatching {
                 val obj = JSONObject(text)
                 val uriList = obj.getJSONArray("uris")
                 val entry = obj.optJSONObject("entry")?.let {
@@ -34,9 +37,8 @@ internal data class TransferJob(
                 }
                 TransferJob(obj.getString("id"), obj.getString("kind"), obj.getString("title"), obj.getString("host"),
                     obj.getInt("port"), obj.getString("deviceName"), obj.getString("fingerprint"),
-                    (0 until uriList.length()).map { uriList.getString(it) }, obj.getString("target"), entry, obj.optInt("nextFile"))
+                    (0 until uriList.length()).map { uriList.getString(it) }, obj.getString("target"), entry, obj.optInt("nextFile"), obj.optString("checkpointHost", obj.getString("host")), obj.optInt("checkpointPort", obj.getInt("port")))
             }.getOrNull()
-        }
         fun clear(context: Context) {
             check(context.getSharedPreferences("nerqo_jobs", Context.MODE_PRIVATE).edit().remove("pending").commit())
         }

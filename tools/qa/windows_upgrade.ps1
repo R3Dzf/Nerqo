@@ -40,7 +40,7 @@ function Stop-Nerqo {
 try {
     Install-Nerqo $OldInstaller
     $old = Start-Nerqo
-    if ($old.version -ne '1.0.7') { throw 'Wrong old application installed' }
+    if ($old.version -ne '1.0.8') { throw 'Wrong old application installed' }
     Stop-Nerqo
     # Isolated GitHub Windows runner: synthetic state, no real user's data.
     $token = 'upgrade-smoke-only-token'
@@ -72,10 +72,10 @@ try {
     })
     if ($installedEntry.Count -ne 1) { throw 'Expected exactly one Nerqo installation entry' }
     $installedDetails = Get-ItemProperty $installedEntry[0].PSPath
-    if ($installedDetails.DisplayVersion -ne '1.0.8') { throw 'Old installed-app version remains registered' }
+    if ($installedDetails.DisplayVersion -ne '1.0.9') { throw 'Old installed-app version remains registered' }
     $current = Start-Nerqo
-    if ($current.version -ne '1.0.8') { throw 'Installed app did not upgrade to 1.0.8' }
-    $cachedInstaller = Join-Path $dataRoot 'Updates\Nerqo-Windows-Setup-1.0.8.exe'
+    if ($current.version -ne '1.0.9') { throw 'Installed app did not upgrade to 1.0.9' }
+    $cachedInstaller = Join-Path $dataRoot 'Updates\Nerqo-Windows-Setup-1.0.9.exe'
     if (-not (Test-Path $cachedInstaller) -or (Get-FileHash $cachedInstaller).Hash -ne (Get-FileHash $NewInstaller).Hash) {
         throw 'Current installer was not cached byte-for-byte for the next delta update'
     }
@@ -85,6 +85,6 @@ try {
         if ((Get-FileHash -LiteralPath $fixture.Path).Hash -ne $fixture.Hash) { throw "Upgrade changed preserved data: $($fixture.Path)" }
     }
     New-Item -ItemType Directory -Force dist/qa | Out-Null
-    'PASS: per-user installer 1.0.7 -> 1.0.8; running old process closed; executable replaced; one installed-app entry; installed native receiver; persistent TLS identity; paired token; shared note; received file preserved.' | Set-Content dist/qa/windows-upgrade.txt
+    'PASS: per-user installer 1.0.8 -> 1.0.9; running old process closed; executable replaced; one installed-app entry; installed native receiver; persistent TLS identity; paired token; shared note; received file preserved.' | Set-Content dist/qa/windows-upgrade.txt
     Get-Content dist/qa/windows-upgrade.txt
 } finally { Stop-Nerqo }

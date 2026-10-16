@@ -434,6 +434,12 @@ try
     await File.WriteAllTextAsync(preparedSource, "Source changed after preparation");
     if (!(await client.GetByteArrayAsync($"/api/files/{prepared.Id}")).SequenceEqual(preparationBytes))
         throw new Exception("Prepared file snapshot changed with the source");
+    var liveSend = host.Transfers.Single(x => x.Name == prepared.Content && x.Direction == "Sending");
+    if (liveSend.Done != prepared.Size || liveSend.Status != "Awaiting verification") throw new Exception("Socket transfer progress not recorded");
+    host.ControlTransfer(liveSend.Id, "pause");
+    if ((await client.GetAsync($"/api/files/{prepared.Id}")).StatusCode != System.Net.HttpStatusCode.Conflict) throw new Exception("Paused send was allowed");
+    host.ControlTransfer(liveSend.Id, "resume");
+    if (!(await client.GetByteArrayAsync($"/api/files/{prepared.Id}")).SequenceEqual(preparationBytes)) throw new Exception("Resumed send bytes changed");
     string receiptSession = Guid.NewGuid().ToString();
     var deliveryReceipt = new { id = prepared.Id, session = receiptSession, size = prepared.Size, sha256 = prepared.Sha256 };
     var wrongReceipt = await client.PostAsJsonAsync("/api/receipts", new { id = prepared.Id, session = receiptSession, size = prepared.Size, sha256 = new string('0', 64) });
@@ -460,6 +466,19 @@ try
 }
 finally { File.Delete(preparedSource); File.Delete(cancelledSource); }
 
+// Fast shares keep the original immutable on Windows, with no duplicate Storage payload.
+string fastPath = Path.Combine(host.ReceivedDirectory, "Fast-" + Guid.NewGuid().ToString("N") + ".bin");
+byte[] fastBytes = RandomNumberGenerator.GetBytes(2 * 1024 * 1024 + 7);
+await File.WriteAllBytesAsync(fastPath, fastBytes);
+await host.ShareFileDirectAsync(fastPath);
+var fastShare = host.Items.Single(x => x.Content == Path.GetFileName(fastPath));
+if (File.Exists(Path.Combine(host.StorageDirectory, fastShare.Id + ".bin"))) throw new Exception("Fast share duplicated source storage");
+if (!(await client.GetByteArrayAsync($"/api/files/{fastShare.Id}")).SequenceEqual(fastBytes)) throw new Exception("Fast share differs from original");
+if (OperatingSystem.IsWindows()) {
+    bool blocked = false;
+    try { using var writer = new FileStream(fastPath, FileMode.Open, FileAccess.Write); } catch (IOException) { blocked = true; }
+    if (!blocked) throw new Exception("Original can change while fast share is published");
+}
 using (var anonymous = new HttpClient(handler, disposeHandler: false) { BaseAddress = client.BaseAddress })
     if ((await anonymous.PostAsJsonAsync("/api/disconnect", new {})).StatusCode != System.Net.HttpStatusCode.Unauthorized)
         throw new Exception("Unauthenticated disconnect was accepted");
@@ -467,8 +486,16 @@ var anotherPair = await client.PostAsJsonAsync("/api/pair", new { pin = host.Pai
 anotherPair.EnsureSuccessStatusCode();
 string anotherToken = (await anotherPair.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("token").GetString()!;
 (await client.PostAsJsonAsync("/api/disconnect", new {})).EnsureSuccessStatusCode();
-if ((await client.GetAsync("/api/items")).StatusCode != System.Net.HttpStatusCode.Unauthorized)
-    throw new Exception("Disconnected client still has access");
+if ((int)(await client.GetAsync("/api/items")).StatusCode != 423) throw new Exception("Disconnected client still has access");
+(await client.PostAsJsonAsync("/api/reconnect", new {})).EnsureSuccessStatusCode();
+(await client.GetAsync("/api/items")).EnsureSuccessStatusCode();
+var suspended = host.PairedDevices.Single(x => x.Name != "Other smoke phone");
+if (!host.SetPeerSuspended(suspended.TokenHash, true)) throw new Exception("Windows disconnect failed");
+if ((int)(await client.GetAsync("/api/items")).StatusCode != 423) throw new Exception("Windows disconnect ignored");
+if (!host.SetPeerSuspended(suspended.TokenHash, false)) throw new Exception("Windows reconnect failed");
+(await client.GetAsync("/api/items")).EnsureSuccessStatusCode();
+(await client.PostAsJsonAsync("/api/forget", new {})).EnsureSuccessStatusCode();
+if ((await client.PostAsJsonAsync("/api/reconnect", new {})).StatusCode != System.Net.HttpStatusCode.Unauthorized) throw new Exception("Forgotten device reconnected without pairing");
 client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", anotherToken);
 (await client.GetAsync("/api/items")).EnsureSuccessStatusCode();
 var devices = host.PairedDevices;

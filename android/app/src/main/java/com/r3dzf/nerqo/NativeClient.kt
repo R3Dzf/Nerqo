@@ -33,6 +33,7 @@ internal data class SharedEntry(
     val size: Long, val sha256: String
 )
 
+internal class ConnectionPausedException : IOException("Disconnected. Choose Reconnect to continue.")
 internal class PairingExpiredException : IOException("Device pairing expired or was revoked")
 internal class NativeHttpException(val httpStatus: Int, details: String) : IOException(details)
 
@@ -142,6 +143,7 @@ internal object NativeClient {
         try {
             TransferControl.check()
             val status = conn.responseCode
+            if (status == 423) throw ConnectionPausedException()
             if (status == 401) throw PairingExpiredException()
             if (status !in 200..299) {
                 val message = conn.errorStream?.bufferedReader()?.use { it.readText().take(256) } ?: "HTTP $status"
@@ -169,6 +171,9 @@ internal object NativeClient {
         postJson(device.endpoint, "/api/receipts", JSONObject().put("id", entry.id).put("session", session)
             .put("size", entry.size).put("sha256", entry.sha256), token)
     }
+    fun reconnect(device: Device, token: String) { postJson(device.endpoint, "/api/reconnect", JSONObject(), token) }
+    fun forget(device: Device, token: String) { postJson(device.endpoint, "/api/forget", JSONObject(), token) }
+    fun checkpointEndpoint(device: Device) = TransferControl.current.get()?.endpointScope ?: device.endpoint
     fun disconnect(device: Device, token: String) {
         postJson(device.endpoint, "/api/disconnect", JSONObject(), token)
     }
@@ -337,7 +342,7 @@ internal object NativeClient {
                           size: Long, expectedSha: String, target: Uri, sessionId: String,
                           progress: (Long, Long) -> Unit) {
         val prefs = context.getSharedPreferences("nerqo_downloads", Context.MODE_PRIVATE)
-        val key = "download_" + sessionId + "_" + sha((device.endpoint + "|" + path + "|" + target + "|" + expectedSha + "|" + size).toByteArray())
+        val key = "download_" + sessionId + "_" + sha((checkpointEndpoint(device) + "|" + path + "|" + target + "|" + expectedSha + "|" + size).toByteArray())
         val record = JSONObject().put("uri", target.toString()).put("offset", 0).put("verified", false)
         val saved = prefs.getString(key, null)?.let { JSONObject(it) }
         val previous = saved?.getLong("offset") ?: 0L
@@ -353,7 +358,8 @@ internal object NativeClient {
                 try {
                     control.checkpoint()
                     val status = conn.responseCode
-                    if (status == 401) throw PairingExpiredException()
+                    if (status == 423) throw ConnectionPausedException()
+            if (status == 401) throw PairingExpiredException()
                     if (status !in listOf(200, 206)) throw NativeHttpException(status, "Download unavailable: HTTP " + status)
                     DownloadResponse(status, conn.getHeaderField("Content-Range"), conn.inputStream) { close(conn) }
                 } catch (error: Exception) { close(conn); throw error }

@@ -68,8 +68,8 @@ jobs:
       - name: Build previous native installer and verify in-place upgrade
         shell: pwsh
         run: |
-          git fetch --depth 1 origin 79878cece398a77bd679904812599e4b31115cc1
-          git worktree add --detach previous-native 79878cece398a77bd679904812599e4b31115cc1
+          git fetch --depth 1 origin 7675ce136be4f5c6d6bca51ab2e982ba530a811d
+          git worktree add --detach previous-native 7675ce136be4f5c6d6bca51ab2e982ba530a811d
           dotnet publish previous-native/desktop/Nerqo.Desktop/Nerqo.Desktop.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:PublishReadyToRun=false -o previous-native/dist/Windows
           if ($LASTEXITCODE -ne 0) { throw 'Previous native publish failed' }
           & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" previous-native/installer/Nerqo.iss

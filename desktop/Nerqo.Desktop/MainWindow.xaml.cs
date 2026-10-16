@@ -24,9 +24,11 @@ public partial class MainWindow : Window
     private List<TransferHistoryEntry> displayedHistory = new();
     private List<TransferItem> displayedShares = new();
     private List<PairedDevice> displayedPeers = new();
-    private List<IncomingTransfer> displayedIncoming = new();
+    private List<LiveTransfer> displayedIncoming = new();
     private bool exiting;
     private bool preparing;
+    private CancellationTokenSource? preparationCancellation;
+    private void CancelPreparation(object s, RoutedEventArgs e) => preparationCancellation?.Cancel();
     private bool loadingTheme = true;
     private bool receiverStarted;
     private bool startingReceiver;
@@ -45,6 +47,9 @@ public partial class MainWindow : Window
         PairCodeLabel.Text = service.PairCode;
         IdentityLabel.Text = service.PairingIdentity;
         service.Changed += () => Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(RefreshItems));
+        var transferTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
+        transferTimer.Tick += (_, _) => RefreshItems(); transferTimer.Start();
+        Closed += (_, _) => transferTimer.Stop();
         Loaded += Start;
         Closing += (s, e) =>
         {
@@ -162,7 +167,7 @@ public partial class MainWindow : Window
         if (!displayedShares.SequenceEqual(entries)) { displayedShares = entries; ItemList.ItemsSource = entries.Select(x => new ActivityRow(x)).ToList(); }
         var peers = service.PairedDevices;
         if (!displayedPeers.SequenceEqual(peers)) { displayedPeers = peers; PeerList.ItemsSource = peers; }
-        var incoming = service.Incoming;
+        var incoming = service.Transfers;
         if (!displayedIncoming.SequenceEqual(incoming)) { displayedIncoming = incoming; IncomingList.ItemsSource = incoming; }
         EmptyIncomingLabel.Visibility = incoming.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         HistoryWarningLabel.Text = service.HistoryWarning;
@@ -178,7 +183,27 @@ public partial class MainWindow : Window
     {
         if (PeerList.SelectedItem is not PairedDevice peer) return;
 
-        if (service.RevokePeer(peer.TokenHash)) { RefreshItems(); FooterLabel.Text = $"Disconnected: {peer.Name}. Scan the pairing QR to reconnect; Wi-Fi stays connected."; }
+        if (service.SetPeerSuspended(peer.TokenHash, true)) { RefreshItems(); FooterLabel.Text = $"Disconnected: {peer.Name}. Pairing is saved. Use Reconnect to restore access; Wi-Fi stays connected."; }
+    }
+    private void ReconnectSelectedPeer(object s, RoutedEventArgs e) { if (PeerList.SelectedItem is PairedDevice peer) service.SetPeerSuspended(peer.TokenHash, false); }
+    private void ForgetSelectedPeer(object s, RoutedEventArgs e) {
+        if (PeerList.SelectedItem is PairedDevice peer && MessageBox.Show($"Remove saved access for {peer.Name}? Pair again using QR to reconnect.", "Forget device", MessageBoxButton.YesNo) == MessageBoxResult.Yes) service.RevokePeer(peer.TokenHash);
+    }
+    private void ControlTransfer(object s, RoutedEventArgs e) { if (s is Button { DataContext: LiveTransfer transfer, Tag: string action }) service.ControlTransfer(transfer.Id, action); }
+    private void ClearHistory(object s, RoutedEventArgs e) {
+        if (MessageBox.Show("Clear the transfer log? Your files will be kept.", "Clear History", MessageBoxButton.YesNo) != MessageBoxResult.Yes) return;
+        try { service.ClearHistory(); RefreshItems(); } catch (Exception ex) { FooterLabel.Text = ex.Message; }
+    }
+    private void OpenHistoryFile(object s, RoutedEventArgs e) => OpenHistorySelection(false);
+    private void ShowHistoryFile(object s, RoutedEventArgs e) => OpenHistorySelection(true);
+    private void OpenHistorySelection(bool folder) {
+        if (HistoryList.SelectedItem is not HistoryRow row) return;
+        string? path = service.HistoryPath(row.Entry);
+        if (path == null) { FooterLabel.Text = "File moved or unavailable on this device."; return; }
+        try {
+            if (folder) Process.Start(new ProcessStartInfo("explorer.exe") { UseShellExecute = true, ArgumentList = { "/select,", path } });
+            else Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
+        } catch (Exception ex) { FooterLabel.Text = ex.Message; }
     }
     private void CopyPairCode(object s, RoutedEventArgs e)
     {
@@ -212,6 +237,10 @@ public partial class MainWindow : Window
     {
         if (preparing) return;
         preparing = true;
+        bool direct = FastShareToggle.IsChecked == true;
+        preparationCancellation = new();
+        var cancellation = preparationCancellation.Token;
+        CancelPreparationButton.Visibility = Visibility.Visible;
         ShareFilesButton.IsEnabled = ShareFolderButton.IsEnabled = false;
         OperationProgress.IsIndeterminate = true;
         OperationProgress.Visibility = Visibility.Visible;
@@ -224,13 +253,17 @@ public partial class MainWindow : Window
                 {
                     bool folder = Directory.Exists(path);
                     Dispatcher.Invoke(() => { FooterLabel.Text = "Preparing " + Path.GetFileName(path) + "…"; OperationProgress.IsIndeterminate = folder; OperationProgress.Value = 0; });
-                    if (folder) await service.ShareFolderDirectAsync(path);
-                    else await service.ShareFileAsync(path, progress: (done, total) => Dispatcher.BeginInvoke(new Action(() =>
+                    if (folder) await service.ShareFolderDirectAsync(path, ct: cancellation);
+                    else {
+                    Action<long, long> preparationProgress = (done, total) => Dispatcher.BeginInvoke(new Action(() =>
                     {
                         OperationProgress.IsIndeterminate = false;
                         OperationProgress.Value = total > 0 ? done * 100.0 / total : 100;
-                        FooterLabel.Text = $"Preparing {Path.GetFileName(path)} · {OperationProgress.Value:0}% · copying and verifying in one pass";
-                    })));
+                        FooterLabel.Text = $"Preparing {Path.GetFileName(path)} · {OperationProgress.Value:0}% · {(direct ? "verifying original without copying" : "copying and verifying in one pass")}";
+                    }));
+                    if (direct) await service.ShareFileDirectAsync(path, cancellation, preparationProgress);
+                    else await service.ShareFileAsync(path, cancellation, preparationProgress);
+                    }
                 }
             });
             RefreshItems();
@@ -239,6 +272,8 @@ public partial class MainWindow : Window
         finally
         {
             preparing = false;
+            preparationCancellation?.Dispose(); preparationCancellation = null;
+            CancelPreparationButton.Visibility = Visibility.Collapsed;
             ShareFilesButton.IsEnabled = ShareFolderButton.IsEnabled = true;
             OperationProgress.IsIndeterminate = false;
             OperationProgress.Visibility = Visibility.Collapsed;

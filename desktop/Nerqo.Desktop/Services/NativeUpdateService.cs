@@ -25,7 +25,7 @@ public static class NativeUpdateService
     private static HttpClient CreateClient()
     {
         var client = new HttpClient { Timeout = TimeSpan.FromMinutes(10) };
-        client.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("Nerqo-Native", "1.0.8"));
+        client.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("Nerqo-Native", "1.0.9"));
         client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/vnd.github+json"));
         return client;
     }

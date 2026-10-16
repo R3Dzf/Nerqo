@@ -54,15 +54,17 @@ internal sealed class FolderRecord
 }
 public sealed record OutgoingFolderFile(string Path, long Size, string Sha256);
 internal sealed record OutgoingFolder(string Root, string Name, List<string> Directories, Dictionary<string, OutgoingFolderFile> Files);
-public sealed record TransferHistoryEntry(string Key, string Name, string Peer, string Direction, string Status, long Size, DateTimeOffset When);
+public sealed record TransferHistoryEntry(string Key, string Name, string Peer, string Direction, string Status, long Size, DateTimeOffset When, string LocalPath = "");
 public sealed record IncomingTransfer(string Name, long Done, long Size)
 {
     public double Percent => Size > 0 ? Math.Clamp(Done * 100.0 / Size, 0, 100) : 0;
     public string Detail => $"{Done / 1048576.0:0.#} / {Size / 1048576.0:0.#} MB received";
 }
-public sealed record PairedDevice(string TokenHash, string Name, DateTimeOffset Expires);
+public sealed record PairedDevice(string TokenHash, string Name, DateTimeOffset Expires, bool Suspended = false)
+{ public string DisplayName => Name + (Suspended ? " · Disconnected" : " · Ready"); }
 internal sealed class PeerRecord
 {
+    public bool Suspended { get; set; }
     public string Name { get; set; } = "";
     public DateTimeOffset Expires { get; set; }
 }
@@ -83,6 +85,60 @@ public sealed class LanHost : IAsyncDisposable
     public const int DiscoveryPort = 44889;
     public const int ChunkLimit = 4 * 1024 * 1024;
     private const long MaxFile = 2L * 1024 * 1024 * 1024 * 1024;
+    private readonly Dictionary<string, (TransferItem Item, string Path, FileStream Lease)> directShares = new();
+    private readonly Dictionary<string, LiveTransfer> live = new();
+    private readonly HashSet<string> stopped = new();
+    private readonly Dictionary<string, (long Done, long Ticks, double Rate)> incomingRates = new();
+    public List<LiveTransfer> Transfers { get { lock (gate) return state.Uploads.Values.Select(x => new LiveTransfer(x.Id, x.Name, "Receiving", stopped.Contains(x.Id) ? "Paused on Windows" : "Ready / checkpoint saved", x.Offset, x.Size, incomingRates.GetValueOrDefault(x.Id).Rate)).Concat(live.Values).Take(200).ToList(); } }
+    internal void StreamProgress(string id, long done, double rate, string status)
+    {
+        lock (gate) if (live.TryGetValue(id, out var entry)) live[id] = entry with { Done = done, Rate = rate, Status = stopped.Contains(id) ? "Paused on Windows" : status };
+    }
+    internal bool StreamStopped(string id) {
+        lock (gate) return stopped.Contains(id) || (id.StartsWith("send:") && (!state.Peers.TryGetValue(id.Split(':')[1], out var peer) || peer.Suspended || peer.Expires <= DateTimeOffset.UtcNow));
+    }
+    public void ControlTransfer(string id, string action)
+    {
+        lock (gate)
+        {
+            if (action == "resume") stopped.Remove(id); else stopped.Add(id);
+            if (action == "cancel" && state.Uploads.Remove(id, out var upload))
+            {
+                File.Delete(Part(id)); incomingRates.Remove(id);
+                RecordHistory("cancelled:" + id, upload.Name, "Android", "Received", "Cancelled", upload.Size);
+                Save();
+            }
+            if (live.TryGetValue(id, out var entry)) live[id] = entry with { Status = action == "resume" ? "Ready · Resume on Android" : action == "cancel" ? "Cancelled on Windows" : "Paused on Windows", Rate = 0 };
+        }
+        Changed?.Invoke();
+    }
+    private IResult TrackFile(HttpContext ctx, string path, string name, long size, string shareId, string member = "")
+    {
+        string id = "send:" + Digest(Bearer(ctx)!) + ":" + shareId + ":" + Digest(member);
+        lock (gate)
+        {
+            if (stopped.Contains(id)) return Results.Conflict(new { error = "Paused on Windows. Resume there before retrying on Android." });
+            live[id] = new(id, name, "Sending", "Starting", 0, size, 0);
+            if (live.Count > 100) foreach (var old in live.Where(x => x.Value.Status is "Awaiting verification" or "Interrupted").Take(live.Count - 100).Select(x => x.Key).ToArray()) live.Remove(old);
+        }
+        Changed?.Invoke();
+        return new TrackedFileResult(path, size, id, this);
+    }
+    public string? HistoryPath(TransferHistoryEntry entry)
+    {
+        if (entry.LocalPath.Length > 0 && (File.Exists(entry.LocalPath) || Directory.Exists(entry.LocalPath))) return entry.LocalPath;
+        lock (gate)
+        {
+            string id = entry.Key.StartsWith("received:") ? entry.Key[9..] : "";
+            string stored = Path.Combine(StorageDirectory, id + ".bin");
+            return Regex.IsMatch(id, "^[a-f0-9]{32}$") && File.Exists(stored) ? stored : null;
+        }
+    }
+    public void ClearHistory()
+    {
+        lock (gate) { File.WriteAllText(Path.Combine(root, "history.json.tmp"), "[]"); File.Move(Path.Combine(root, "history.json.tmp"), Path.Combine(root, "history.json"), true); history.Clear(); historyWritable = true; HistoryWarning = ""; }
+        Changed?.Invoke();
+    }
     private readonly object gate = new();
     private readonly ConcurrentDictionary<string, Queue<DateTimeOffset>> attempts = new();
     private readonly ConcurrentDictionary<string, OutgoingFolder> outgoingFolders = new();
@@ -101,14 +157,14 @@ public sealed class LanHost : IAsyncDisposable
     public string ReceivedDirectory => Path.Combine(root, "Received");
     public string StorageDirectory => Path.Combine(root, "Storage");
     public event Action? Changed;
-    public List<TransferItem> Items { get { lock (gate) return state.Items.OrderByDescending(x => x.Created).Take(150).Select(x => x).ToList(); } }
-    public List<PairedDevice> PairedDevices { get { lock (gate) return state.Peers.Where(x => x.Value.Expires > DateTimeOffset.UtcNow).Select(x => new PairedDevice(x.Key, x.Value.Name, x.Value.Expires)).OrderBy(x => x.Name).ToList(); } }
+    public List<TransferItem> Items { get { lock (gate) return state.Items.Concat(directShares.Values.Select(x => x.Item)).OrderByDescending(x => x.Created).Take(150).Select(x => x).ToList(); } }
+    public List<PairedDevice> PairedDevices { get { lock (gate) return state.Peers.Where(x => x.Value.Expires > DateTimeOffset.UtcNow).Select(x => new PairedDevice(x.Key, x.Value.Name, x.Value.Expires, x.Value.Suspended)).OrderBy(x => x.Name).ToList(); } }
     public List<TransferHistoryEntry> History { get { lock (gate) return history.OrderByDescending(x => x.When).Take(500).ToList(); } }
     public List<IncomingTransfer> Incoming { get { lock (gate) return state.Uploads.Values.Select(x => new IncomingTransfer(x.Name, x.Offset, x.Size)).ToList(); } }
-    private void RecordHistory(string key, string name, string peer, string direction, string status, long size)
+    private void RecordHistory(string key, string name, string peer, string direction, string status, long size, string localPath = "")
     {
         if (history.Any(x => x.Key == key)) return;
-        history.Add(new(key, name, peer, direction, status, size, DateTimeOffset.UtcNow));
+        history.Add(new(key, name, peer, direction, status, size, DateTimeOffset.UtcNow, localPath));
         if (history.Count > 500) history.RemoveRange(0, history.Count - 500);
         if (!historyWritable) return;
         // The log is separate from frequent upload checkpoints. Logging failures must not fail a verified delivery.
@@ -121,6 +177,14 @@ public sealed class LanHost : IAsyncDisposable
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         { HistoryWarning = "History could not be saved. New entries are currently in memory only."; }
+    }
+    public bool SetPeerSuspended(string tokenHash, bool suspended)
+    {
+        lock (gate)
+        {
+            if (!state.Peers.TryGetValue(tokenHash, out var peer) || peer.Expires <= DateTimeOffset.UtcNow) return false;
+            peer.Suspended = suspended; Save(); return true;
+        }
     }
     public bool RevokePeer(string tokenHash)
     {
@@ -268,14 +332,14 @@ public sealed class LanHost : IAsyncDisposable
         if (header?.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase) == true) return header[7..].Trim();
         return ctx.Request.Headers["X-Nerqo-Token"].ToString();
     }
-    private PeerRecord? Authorize(HttpContext ctx)
+    private PeerRecord? Authorize(HttpContext ctx, bool allowSuspended = false)
     {
         var token = Bearer(ctx);
         if (string.IsNullOrWhiteSpace(token) || token.Length > 256) return null;
         lock (gate)
         {
             state.Peers.TryGetValue(Digest(token), out var peer);
-            return peer != null && peer.Expires > DateTimeOffset.UtcNow ? peer : null;
+            return peer != null && peer.Expires > DateTimeOffset.UtcNow && (allowSuspended || !peer.Suspended) ? peer : null;
         }
     }
     private bool PairAllowed(string ip)
@@ -308,7 +372,9 @@ public sealed class LanHost : IAsyncDisposable
     }
     private static string? Str(JsonElement json, string field) => json.TryGetProperty(field, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
     private static long Number(JsonElement json, string field) => json.TryGetProperty(field, out var v) && v.TryGetInt64(out long n) ? n : -1;
-    private static IResult Unauthorized() => Results.Json(new { error = "Pair this device with the code shown on Windows." }, statusCode: 401);
+    private IResult Unauthorized(HttpContext ctx) => Authorize(ctx, true)?.Suspended == true
+        ? Results.Json(new { error = "Connection paused. Choose Reconnect on either device." }, statusCode: 423)
+        : Results.Json(new { error = "Pair this device with the code shown on Windows." }, statusCode: 401);
 
     public async Task StartAsync()
     {
@@ -330,7 +396,7 @@ public sealed class LanHost : IAsyncDisposable
             catch (BadHttpRequestException e) { if (!ctx.Response.HasStarted) { ctx.Response.StatusCode = e.StatusCode; await ctx.Response.WriteAsJsonAsync(new { error = e.Message }); } }
             catch (JsonException) { if (!ctx.Response.HasStarted) { ctx.Response.StatusCode = 400; await ctx.Response.WriteAsJsonAsync(new { error = "Invalid JSON" }); } }
         });
-        app.MapGet("/api/status", (HttpContext ctx) => Results.Json(new { name = Environment.MachineName, authorized = Authorize(ctx) != null, port = Port, version = "1.0.8", transferProtocol = 2, band = WifiInspector.GetBand() }));
+        app.MapGet("/api/status", (HttpContext ctx) => Results.Json(new { name = Environment.MachineName, authorized = Authorize(ctx) != null, port = Port, version = "1.0.9", transferProtocol = 2, band = WifiInspector.GetBand() }));
         app.MapPost("/api/pair", async (HttpContext ctx) =>
         {
             string ip = ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown";
@@ -347,13 +413,24 @@ public sealed class LanHost : IAsyncDisposable
         });
         app.MapPost("/api/disconnect", (HttpContext ctx) =>
         {
-            if (Authorize(ctx) == null) return Unauthorized();
-            RevokePeer(Digest(Bearer(ctx)!));
+            if (Authorize(ctx) == null) return Unauthorized(ctx);
+            SetPeerSuspended(Digest(Bearer(ctx)!), true);
             return Results.Json(new { disconnected = true });
+        });
+        app.MapPost("/api/reconnect", (HttpContext ctx) =>
+        {
+            if (Authorize(ctx, true) == null) return Unauthorized(ctx);
+            SetPeerSuspended(Digest(Bearer(ctx)!), false);
+            return Results.Json(new { ok = true });
+        });
+        app.MapPost("/api/forget", (HttpContext ctx) =>
+        {
+            if (Authorize(ctx, true) == null) return Unauthorized(ctx);
+            RevokePeer(Digest(Bearer(ctx)!)); return Results.Json(new { ok = true });
         });
         app.MapPost("/api/receipts", async (HttpContext ctx) =>
         {
-            var peer = Authorize(ctx); if (peer == null) return Unauthorized();
+            var peer = Authorize(ctx); if (peer == null) return Unauthorized(ctx);
             using var doc = await ReadJson(ctx.Request, ctx.RequestAborted);
             var body = doc.RootElement;
             string id = Str(body, "id") ?? "";
@@ -362,17 +439,18 @@ public sealed class LanHost : IAsyncDisposable
             string hash = Str(body, "sha256") ?? "";
             lock (gate)
             {
-                var item = state.Items.FirstOrDefault(x => x.Id == id && x.LocalShare && x.Kind is "file" or "folder");
+                var item = state.Items.Concat(directShares.Values.Select(x => x.Item)).FirstOrDefault(x => x.Id == id && x.LocalShare && x.Kind is "file" or "folder");
                 if (item == null || item.Size != size || item.Sha256 != hash) return Results.BadRequest();
-                RecordHistory("sent:" + Digest(Bearer(ctx)!) + ":" + session.ToString("N"), item.Content, peer.Name, "Sent", "Completed", item.Size);
+                foreach (var key in live.Keys.Where(k => k.StartsWith("send:" + Digest(Bearer(ctx)!) + ":" + id + ":")).ToArray()) live.Remove(key);
+                RecordHistory("sent:" + Digest(Bearer(ctx)!) + ":" + session.ToString("N"), item.Content, peer.Name, "Sent", "Completed", item.Size, directShares.TryGetValue(id, out var source) ? source.Path : item.Kind == "file" ? Path.Combine(StorageDirectory, id + ".bin") : outgoingFolders.TryGetValue(id, out var sharedFolder) ? sharedFolder.Root : "");
                 Save();
             }
             return Results.Json(new { confirmed = true });
         });
-        app.MapGet("/api/items", (HttpContext ctx) => Authorize(ctx) == null ? Unauthorized() : Results.Json(new { items = Items }));
+        app.MapGet("/api/items", (HttpContext ctx) => Authorize(ctx) == null ? Unauthorized(ctx) : Results.Json(new { items = Items }));
         app.MapPost("/api/items", async (HttpContext ctx) =>
         {
-            var peer = Authorize(ctx); if (peer == null) return Unauthorized();
+            var peer = Authorize(ctx); if (peer == null) return Unauthorized(ctx);
             using var doc = await ReadJson(ctx.Request, ctx.RequestAborted);
             string? kind = Str(doc.RootElement, "kind"), content = Str(doc.RootElement, "content");
             if (kind is not ("text" or "link") || string.IsNullOrWhiteSpace(content) || Encoding.UTF8.GetByteCount(content) > 32768 || (kind == "link" && !(Uri.TryCreate(content, UriKind.Absolute, out var uri) && uri.Scheme is ("http" or "https")))) return Results.BadRequest();
@@ -382,7 +460,7 @@ public sealed class LanHost : IAsyncDisposable
         });
         app.MapPost("/api/folders/begin", async (HttpContext ctx) =>
         {
-            if (Authorize(ctx) == null) return Unauthorized();
+            if (Authorize(ctx) == null) return Unauthorized(ctx);
             using var doc = await ReadJson(ctx.Request, ctx.RequestAborted);
             string name = ValidName(Str(doc.RootElement, "name"));
             ValidFolderPath(name);
@@ -413,7 +491,7 @@ public sealed class LanHost : IAsyncDisposable
         });
         app.MapPost("/api/folders/{id}/directory", async (string id, HttpContext ctx) =>
         {
-            if (Authorize(ctx) == null) return Unauthorized();
+            if (Authorize(ctx) == null) return Unauthorized(ctx);
             ValidId(id);
             using var doc = await ReadJson(ctx.Request, ctx.RequestAborted);
             string relative = ValidFolderPath(Str(doc.RootElement, "path"));
@@ -427,7 +505,7 @@ public sealed class LanHost : IAsyncDisposable
         });
         app.MapPost("/api/transfers/begin", async (HttpContext ctx) =>
         {
-            var peer = Authorize(ctx); if (peer == null) return Unauthorized();
+            var peer = Authorize(ctx); if (peer == null) return Unauthorized(ctx);
             using var doc = await ReadJson(ctx.Request, ctx.RequestAborted);
             string name = ValidName(Str(doc.RootElement, "name"));
             long size = Number(doc.RootElement, "size");
@@ -483,7 +561,7 @@ public sealed class LanHost : IAsyncDisposable
         });
         app.MapPut("/api/transfers/{id}/chunk", async (string id, HttpContext ctx) =>
         {
-            if (Authorize(ctx) == null) return Unauthorized();
+            if (Authorize(ctx) == null) return Unauthorized(ctx);
             ValidId(id);
             long offset = long.TryParse(ctx.Request.Headers["X-Offset"].ToString(), out long val) ? val : -1;
             int length = ctx.Request.ContentLength is > 0 and <= ChunkLimit ? (int)ctx.Request.ContentLength.Value : -1;
@@ -497,16 +575,23 @@ public sealed class LanHost : IAsyncDisposable
                 return Results.UnprocessableEntity();
             lock (gate)
             {
+                if (Authorize(ctx) == null) return Unauthorized(ctx);
+                if (stopped.Contains(id)) return Results.Conflict(new { error = "Paused on Windows" });
                 if (!state.Uploads.TryGetValue(id, out var t) || t.Owner != Digest(Bearer(ctx)!) || t.Offset != offset || offset + length > t.Size) return Results.Conflict();
                 using var stream = new FileStream(Part(id), FileMode.Open, FileAccess.Write, FileShare.None);
                 if (stream.Length != offset) return Results.Conflict();
                 stream.Position = offset; stream.Write(data); stream.Flush(true);
-                t.Offset += length; Save(); return Results.Json(new { offset = t.Offset });
+                t.Offset += length;
+                long now = System.Diagnostics.Stopwatch.GetTimestamp();
+                var previous = incomingRates.GetValueOrDefault(id);
+                double seconds = previous.Ticks > 0 ? (now - previous.Ticks) / (double)System.Diagnostics.Stopwatch.Frequency : 0;
+                incomingRates[id] = (t.Offset, now, seconds > 0 ? (t.Offset - previous.Done) / seconds : 0);
+                Save(); return Results.Json(new { offset = t.Offset });
             }
         });
         app.MapPost("/api/transfers/{id}/finish", (string id, HttpContext ctx) =>
         {
-            if (Authorize(ctx) is not { } peer) return Unauthorized();
+            if (Authorize(ctx) is not { } peer) return Unauthorized(ctx);
             ValidId(id);
             string expectedHash = ctx.Request.Query["sha256"].ToString();
             if (!Regex.IsMatch(expectedHash, "^[a-fA-F0-9]{64}$"))
@@ -555,7 +640,7 @@ public sealed class LanHost : IAsyncDisposable
                     Content = t.FolderId.Length > 0 ? t.RelativePath : t.Name,
                     FolderId = t.FolderId, Size = t.Size, Sha256 = hash };
                 state.Items.Add(item);
-                RecordHistory("received:" + id, item.Content, peer.Name, "Received", "Completed", item.Size);
+                RecordHistory("received:" + id, item.Content, peer.Name, "Received", "Completed", item.Size, target);
                 state.CompletedUploads[id] = new CompletedUploadRecord { Upload = t, Sha256 = hash };
                 state.Uploads.Remove(id); Save();
                 return Results.Json(new { id, name = t.Name, size = t.Size, sha256 = hash });
@@ -563,7 +648,7 @@ public sealed class LanHost : IAsyncDisposable
         });
         app.MapDelete("/api/transfers/{id}", (string id, HttpContext ctx) =>
         {
-            var peer = Authorize(ctx); if (peer == null) return Unauthorized();
+            var peer = Authorize(ctx); if (peer == null) return Unauthorized(ctx);
             ValidId(id);
             string owner = Digest(Bearer(ctx)!);
             lock (gate)
@@ -581,7 +666,7 @@ public sealed class LanHost : IAsyncDisposable
         // manifest and saves each member into its selected SAF document tree.
         app.MapGet("/api/outgoing-folders/{id}/manifest", (string id, HttpContext ctx) =>
         {
-            if (Authorize(ctx) == null) return Unauthorized();
+            if (Authorize(ctx) == null) return Unauthorized(ctx);
             ValidId(id);
             if (!outgoingFolders.TryGetValue(id, out var folder)) return Results.NotFound();
             return Results.Json(new
@@ -593,7 +678,7 @@ public sealed class LanHost : IAsyncDisposable
         });
         app.MapGet("/api/outgoing-folders/{id}/file", (string id, HttpContext ctx) =>
         {
-            if (Authorize(ctx) == null) return Unauthorized();
+            if (Authorize(ctx) == null) return Unauthorized(ctx);
             ValidId(id);
             if (!outgoingFolders.TryGetValue(id, out var folder)) return Results.NotFound();
             string relative = ValidFolderPath(ctx.Request.Query["path"].ToString());
@@ -609,16 +694,22 @@ public sealed class LanHost : IAsyncDisposable
             if (!File.Exists(physical) || new FileInfo(physical).Length != member.Size)
                 return Results.Conflict();
             ctx.Response.Headers["X-SHA256"] = member.Sha256;
-            return Results.File(physical, "application/octet-stream", enableRangeProcessing: true);
+            return TrackFile(ctx, physical, relative, member.Size, id, relative);
         });
         app.MapGet("/api/files/{id}", (string id, HttpContext ctx) =>
         {
-            if (Authorize(ctx) == null) return Unauthorized();
+            if (Authorize(ctx) == null) return Unauthorized(ctx);
             ValidId(id);
-            TransferItem? item; lock (gate) item = state.Items.FirstOrDefault(x => x.Id == id && x.Kind == "file");
-            if (item == null || !File.Exists(Path.Combine(StorageDirectory, id + ".bin"))) return Results.NotFound();
+            TransferItem? item; string path;
+            lock (gate)
+            {
+                item = state.Items.FirstOrDefault(x => x.Id == id && x.Kind == "file");
+                path = Path.Combine(StorageDirectory, id + ".bin");
+                if (directShares.TryGetValue(id, out var source)) { item = source.Item; path = source.Path; }
+            }
+            if (item == null || !File.Exists(path)) return Results.NotFound();
             ctx.Response.Headers["X-SHA256"] = item.Sha256;
-            return Results.File(Path.Combine(StorageDirectory, id + ".bin"), "application/octet-stream", item.Content, enableRangeProcessing: true);
+            return TrackFile(ctx, path, item.Content, item.Size, id);
         });
         try { await app.StartAsync(); }
         catch { try { await app.DisposeAsync(); } catch { } app = null; throw; }
@@ -632,6 +723,34 @@ public sealed class LanHost : IAsyncDisposable
         string path = Path.Combine(ReceivedDirectory, name); int i = 1;
         while (File.Exists(path)) path = Path.Combine(ReceivedDirectory, $"{baseName} ({i++}){ext}");
         return path;
+    }
+    /// <summary>Optional faster preparation: no duplicate copy; keep a Windows read lease until app exit.</summary>
+    public async Task ShareFileDirectAsync(string path, CancellationToken ct = default, Action<long, long>? progress = null)
+    {
+        string id = Id();
+        var source = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 1024 * 1024, true);
+        bool retained = false;
+        try
+        {
+            long size = source.Length;
+            if (size > MaxFile) throw new IOException("File exceeds the supported size limit");
+            using var digest = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+            byte[] buffer = new byte[1024 * 1024]; long done = 0; int lastPercent = -1;
+            progress?.Invoke(0, size);
+            while (true)
+            {
+                int count = await source.ReadAsync(buffer, ct); if (count == 0) break;
+                digest.AppendData(buffer, 0, count); done += count;
+                int percent = size > 0 ? (int)(done * 100 / size) : 100;
+                if (percent != lastPercent) { progress?.Invoke(done, size); lastPercent = percent; }
+            }
+            ct.ThrowIfCancellationRequested();
+            if (done != size) throw new IOException("Source changed during preparation");
+            var item = new TransferItem { Id = id, Kind = "file", Content = ValidName(Path.GetFileName(path)), Size = size, Sha256 = Hex(digest.GetHashAndReset()), Sender = "Windows", LocalShare = true };
+            lock (gate) directShares[id] = (item, Path.GetFullPath(path), source);
+            retained = true; progress?.Invoke(size, size); Changed?.Invoke();
+        }
+        finally { if (!retained) await source.DisposeAsync(); }
     }
     public async Task ShareFileAsync(string path, CancellationToken ct = default, Action<long, long>? progress = null)
     {
@@ -831,6 +950,7 @@ public sealed class LanHost : IAsyncDisposable
     {
         if (discoveryCancellation != null) { await discoveryCancellation.CancelAsync(); if (discoveryTask != null) await discoveryTask; discoveryCancellation.Dispose(); }
         if (app != null) await app.DisposeAsync();
+        lock (gate) { foreach (var source in directShares.Values) source.Lease.Dispose(); directShares.Clear(); }
         tlsCertificate.Dispose();
     }
 }

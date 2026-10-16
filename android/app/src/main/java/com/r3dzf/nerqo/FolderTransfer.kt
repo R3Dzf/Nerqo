@@ -30,7 +30,7 @@ internal object FolderTransfer {
         val rootName = safeName(root.name)
         val preferences = context.getSharedPreferences("nerqo_native", Context.MODE_PRIVATE)
         val hash = MessageDigest.getInstance("SHA-256").digest(
-            (device.address + ":" + device.port + ":" + tree.toString()).toByteArray(Charsets.UTF_8)
+            (NativeClient.checkpointEndpoint(device).removePrefix("https://") + ":" + tree.toString()).toByteArray(Charsets.UTF_8)
         ).joinToString("") { "%02x".format(it.toInt() and 0xff) }
         val key = "folder_session_" + sessionId + "_" + hash
         val previous = preferences.getString(key, null)

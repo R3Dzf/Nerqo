@@ -92,7 +92,22 @@ time.sleep(1)
 tap('Pause')
 time.sleep(1)
 capture('Transfer-paused')
-resume()
+resume(must_be_active=True)
+# The foreground service must keep writing while the Activity is stopped and screen is off.
+before = int(adb('shell', 'run-as', 'com.r3dzf.nerqo', 'stat', '-c', '%s', 'cache/transport-fixtures/ui-resume.bin').strip())
+adb('shell', 'input', 'keyevent', 'KEYCODE_HOME')
+adb('shell', 'input', 'keyevent', 'KEYCODE_SLEEP')
+time.sleep(4)
+service = adb('shell', 'dumpsys', 'activity', 'services', 'com.r3dzf.nerqo')
+(OUTPUT / 'background-service.txt').write_text(service)
+if 'TransferService' not in service or 'isForeground=true' not in service:
+    failure('Transfer is not owned by a foreground service while screen is off')
+after = int(adb('shell', 'run-as', 'com.r3dzf.nerqo', 'stat', '-c', '%s', 'cache/transport-fixtures/ui-resume.bin').strip())
+if after <= before:
+    failure('Saved file did not grow with the Activity stopped and screen off')
+adb('shell', 'input', 'keyevent', 'KEYCODE_WAKEUP')
+adb('shell', 'wm', 'dismiss-keyguard')
+adb('shell', 'am', 'start', '-W', '-n', 'com.r3dzf.nerqo/.MainActivity')
 for _ in range(25):
     time.sleep(2)
     try:
@@ -111,7 +126,7 @@ received = adb('exec-out', 'run-as', 'com.r3dzf.nerqo', 'cat', 'cache/transport-
 expected = bytes(range(256)) * (32 * 4096) + b'ui'
 if hashlib.sha256(received).digest() != hashlib.sha256(expected).digest():
     raise RuntimeError('UI-resumed document does not match the TLS source')
-(OUTPUT / 'transfer-verification.txt').write_text('PASS: restored download; native Pause/Resume; final size and SHA-256 match source.\n')
+(OUTPUT / 'transfer-verification.txt').write_text('PASS: restored download; native Pause/Resume; screen-off foreground service kept writing; final size and SHA-256 match source.\n')
 tap('History')
 capture('History')
 tap('Settings')

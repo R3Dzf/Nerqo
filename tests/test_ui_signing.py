@@ -18,8 +18,8 @@ class NativeSigningTests(unittest.TestCase):
         self.assertNotIn("WebView", xaml)
         self.assertIn('Click="ShareFolder"', xaml)
         self.assertIn("folderPicker.launch(null)", android)
-        self.assertIn("FolderTransfer.send", android)
-        self.assertIn("FolderReceiver.receive", android)
+        self.assertIn("FolderTransfer.send", (ROOT / "android/app/src/main/java/com/r3dzf/nerqo/TransferService.kt").read_text())
+        self.assertIn("FolderReceiver.receive", (ROOT / "android/app/src/main/java/com/r3dzf/nerqo/TransferService.kt").read_text())
         self.assertIn("outgoingFolderManifest", (ROOT / "android/app/src/main/java/com/r3dzf/nerqo/NativeClient.kt").read_text())
         self.assertIn("ShareFolderDirectAsync", (ROOT / "desktop/Nerqo.Desktop/Services/LanHost.cs").read_text())
         direct = (ROOT / "android/app/src/main/java/com/r3dzf/nerqo/FolderTransfer.kt").read_text()
@@ -49,7 +49,7 @@ class NativeSigningTests(unittest.TestCase):
         self.assertTrue(all((w, i, a)))
         self.assertEqual(w.group(1), i.group(1))
         self.assertEqual(w.group(1), a.group(1))
-        self.assertIn("versionCode = 10008", gradle)
+        self.assertIn("versionCode = 10009", gradle)
 
     def test_native_signed_release_verification(self):
         wf = (ROOT / ".github/workflows/release.yml").read_text()

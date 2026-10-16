@@ -9,6 +9,7 @@ internal class TransferCancelled : IOException("Transfer cancelled")
 
 /** Cooperative checkpoints plus immediate interruption of an active network request. */
 internal class TransferControl(private val onPhase: (String) -> Unit = {}) {
+    var endpointScope: String? = null
     @Volatile var stop: TransferStop? = null
         private set
     private val gate = Any()
