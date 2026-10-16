@@ -1,12 +1,12 @@
 # Nerqo native implementation status
 
-Stable LAN/hotspot channel: **1.0.4** on `main`; **1.0.5** is being validated on `dev/native-5ghz-20261016`.
+Stable LAN/hotspot channel: **1.0.5**. Development branch: `dev/native-5ghz-20261016`.
 This document records implementation and validation separately. A green build is
 not evidence of a successful transfer between physical Windows/Android devices.
 
 ## The nine agreed phases
 
-The 1.0.5 candidate limits Firewall rule diagnostics to attributable executable
+Version 1.0.5 limits Firewall rule diagnostics to attributable executable
 rules, prevents duplicate Windows instances, restores the running window on a
 second launch, and exposes receiver startup errors with retry and explicit
 diagnostic copying. The host smoke test reproduces an occupied TCP port and
@@ -23,7 +23,7 @@ be exited once before the first launch of this update.
 | 06 Text/links | Two-way text and links; copy; Android share target; explicit Paste button | Optional clipboard sync remains unimplemented; clipboard is read only on explicit Paste |
 | 07 Security | Persistent Windows TLS identity; QR/manual identity verification; Android pinning; revocable peer tokens; path/reparse checks | Independent audit and broader adversarial/lifecycle testing |
 | 08 Connection alternatives | Same LAN; normal phone hotspot; system-managed Android local-only hotspot with generated secure credentials | Native Wi-Fi Direct and Bluetooth transports are not implemented |
-| 09 Delivery/updates | WPF installer; permanent Android certificate pin; stable-only native updater; full/delta reconstruction; coordinated native versioning; source/payload/signing checks; per-user installer 1.0.1 → 1.0.3 tested on a Windows CI runner | Physical in-place upgrade; Windows Authenticode publisher signature; broader physical-device acceptance |
+| 09 Delivery/updates | WPF installer; permanent Android certificate pin; stable-only native updater; full/delta reconstruction; coordinated native versioning; source/payload/signing checks; per-user installer 1.0.1 → 1.0.5 tested on a Windows CI runner | Physical in-place upgrade; Windows Authenticode publisher signature; broader physical-device acceptance |
 
 ## UI and identity (1.0.1)
 
