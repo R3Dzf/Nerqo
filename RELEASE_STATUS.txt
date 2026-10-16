@@ -1,6 +1,7 @@
 Nerqo native 1.0.9 Stable channel
 
-Android user-started foreground transfer service, notification controls and
+Android user-started foreground transfer service, Sending/Receiving percentage,
+speed/ETA, retained outcome notifications, Pause/Resume/Cancel controls and
 checkpoints; temporary Disconnect/Reconnect separated from Forget; pinned
 identity checks before moving paused jobs to a new private address.
 
