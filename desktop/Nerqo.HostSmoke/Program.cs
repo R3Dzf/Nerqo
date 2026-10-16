@@ -103,7 +103,7 @@ using (var wrongHash = new ByteArrayContent(uploaded))
 }
 var put = await client.PutAsync($"/api/transfers/{id}/chunk", chunk);
 put.EnsureSuccessStatusCode();
-var finish = await client.PostAsJsonAsync($"/api/transfers/{id}/finish?sha256=${Convert.ToHexString(SHA256.HashData(uploaded)).ToLowerInvariant()}", new {});
+var finish = await client.PostAsJsonAsync($"/api/transfers/{id}/finish?sha256={Convert.ToHexString(SHA256.HashData(uploaded)).ToLowerInvariant()}", new {});
 finish.EnsureSuccessStatusCode();
 if ((await client.PostAsJsonAsync($"/api/transfers/{id}/finish", new {})).StatusCode
     != System.Net.HttpStatusCode.BadRequest)
@@ -147,14 +147,14 @@ using (var part2 = new ByteArrayContent(second))
     part2.Headers.Add("X-SHA256", Convert.ToHexString(SHA256.HashData(second)).ToLowerInvariant());
     (await client.PutAsync($"/api/transfers/{resumableId}/chunk", part2)).EnsureSuccessStatusCode();
 }
-(await client.PostAsJsonAsync($"/api/transfers/{resumableId}/finish?sha256=${Convert.ToHexString(SHA256.HashData(total)).ToLowerInvariant()}", new {})).EnsureSuccessStatusCode();
+(await client.PostAsJsonAsync($"/api/transfers/{resumableId}/finish?sha256={Convert.ToHexString(SHA256.HashData(total)).ToLowerInvariant()}", new {})).EnsureSuccessStatusCode();
 if (!total.SequenceEqual(await client.GetByteArrayAsync($"/api/files/{resumableId}")))
     throw new Exception("Resumed file bytes differ from original");
 // Empty files should also survive begin/finish without producing a corrupt download.
 var emptyResponse = await client.PostAsJsonAsync("/api/transfers/begin", new { name = "empty.dat", size = 0 });
 emptyResponse.EnsureSuccessStatusCode();
 string emptyId = (await emptyResponse.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetString()!;
-(await client.PostAsJsonAsync($"/api/transfers/{emptyId}/finish?sha256=${Convert.ToHexString(SHA256.HashData(Array.Empty<byte>())).ToLowerInvariant()}", new {})).EnsureSuccessStatusCode();
+(await client.PostAsJsonAsync($"/api/transfers/{emptyId}/finish?sha256={Convert.ToHexString(SHA256.HashData(Array.Empty<byte>())).ToLowerInvariant()}", new {})).EnsureSuccessStatusCode();
 if ((await client.GetByteArrayAsync($"/api/files/{emptyId}")).Length != 0)
     throw new Exception("Empty file transfer corrupted");
 
@@ -210,7 +210,7 @@ using (var folderPart = new ByteArrayContent(folderPayload))
     folderPart.Headers.Add("X-SHA256", Convert.ToHexString(SHA256.HashData(folderPayload)).ToLowerInvariant());
     (await client.PutAsync($"/api/transfers/{folderFileId}/chunk", folderPart)).EnsureSuccessStatusCode();
 }
-(await client.PostAsJsonAsync($"/api/transfers/{folderFileId}/finish?sha256=${Convert.ToHexString(SHA256.HashData(folderPayload)).ToLowerInvariant()}", new {})).EnsureSuccessStatusCode();
+(await client.PostAsJsonAsync($"/api/transfers/{folderFileId}/finish?sha256={Convert.ToHexString(SHA256.HashData(folderPayload)).ToLowerInvariant()}", new {})).EnsureSuccessStatusCode();
 var directParent = Directory.GetDirectories(host.ReceivedDirectory, "DirectPhotos (*)").Single();
 var directFile = Path.Combine(directParent, "nested", "photo.txt");
 if (!File.Exists(directFile) || !folderPayload.SequenceEqual(await File.ReadAllBytesAsync(directFile)))
