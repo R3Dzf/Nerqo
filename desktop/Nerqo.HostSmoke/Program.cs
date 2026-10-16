@@ -4,6 +4,23 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 
+static void TestOldInstallerCleanup()
+{
+    string dir = Path.Combine(Path.GetTempPath(), "NerqoCache-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(dir);
+    try
+    {
+        string[] names = { "Nerqo-Windows-Setup-1.0.5.exe", "Nerqo-Windows-Setup-1.0.6.exe", "Nerqo-Windows-Setup-1.0.7.exe", "Nerqo-Windows-Setup-1.0.8.exe", "other.exe", "Nerqo-Windows-Setup-not-a-version.exe" };
+        foreach (string name in names) File.WriteAllText(Path.Combine(dir, name), "test");
+        NativeUpdateService.CleanupOlderCachedInstallers(dir, new Version(1, 0, 7, 0));
+        foreach (string name in names)
+            if (File.Exists(Path.Combine(dir, name)) != (name != names[0] && name != names[1]))
+                throw new Exception("Unexpected update-cache cleanup result: " + name);
+    }
+    finally { Directory.Delete(dir, true); }
+}
+TestOldInstallerCleanup();
+
 // Read-side firewall decisions must reject partial, public-only and blocking rules.
 static void TestFirewallDecisions()
 {

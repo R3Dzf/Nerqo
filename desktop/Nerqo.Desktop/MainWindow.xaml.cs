@@ -57,6 +57,13 @@ public partial class MainWindow : Window
         try
         {
             bool smoke = Environment.GetCommandLineArgs().Contains("--ui-smoke");
+            try
+            {
+                NativeUpdateService.CleanupOlderCachedInstallers(
+                    Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Nerqo", "Updates"),
+                    typeof(MainWindow).Assembly.GetName().Version!);
+            }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
             // Check before listening so our consent flow can install precise rules
             // before Windows considers displaying its generic app permission prompt.
             await RefreshFirewallAsync(!smoke && !Environment.GetCommandLineArgs().Contains("--upgrade-smoke"));

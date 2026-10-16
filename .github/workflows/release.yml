@@ -79,13 +79,16 @@ jobs:
         timeout-minutes: 5
         shell: pwsh
         run: |
-          git fetch --depth 1 origin f512d40c7c4ca9809156202f970553af0f322652
-          git worktree add --detach previous-native f512d40c7c4ca9809156202f970553af0f322652
+          git fetch --depth 1 origin 84ef1449cf0bbfc0090b8828123f83d747540b64
+          git worktree add --detach previous-native 84ef1449cf0bbfc0090b8828123f83d747540b64
           dotnet publish previous-native/desktop/Nerqo.Desktop/Nerqo.Desktop.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:PublishReadyToRun=false -o previous-native/dist/Windows
           if ($LASTEXITCODE -ne 0) { throw 'Previous native publish failed' }
           & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" previous-native/installer/Nerqo.iss
           if ($LASTEXITCODE -ne 0) { throw 'Previous native installer failed' }
           ./tools/qa/windows_upgrade.ps1 -OldInstaller previous-native/dist/Installer/Nerqo-Windows-Setup.exe -NewInstaller dist/Installer/Nerqo-Windows-Setup.exe
+          if ($LASTEXITCODE -ne 0) { throw 'Native upgrade verification failed' }
+          python tools/qa/windows_delta_budget.py --baseline-source previous-native/dist/Windows --target dist/Installer/Nerqo-Windows-Setup.exe
+          if ($LASTEXITCODE -ne 0) { throw 'Installer delta budget verification failed' }
       - uses: actions/upload-artifact@v4
         with:
           name: stable-windows-setup

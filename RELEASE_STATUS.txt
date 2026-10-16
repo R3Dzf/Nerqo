@@ -1,12 +1,10 @@
-Nerqo native 1.0.6 Stable channel
+Nerqo native 1.0.7 Stable channel
 
-Windows WPF and Android Compose. This update adds portrait QR scanning,
-consent-based Wi-Fi QR joining, a Windows hotspot settings shortcut,
-Disconnect on both devices and quiet Android background refresh.
-Publication requires all build, transport, UI and signing gates to pass.
+Delta-friendly Windows installer packaging; in-place replacement with running
+app closure; obsolete installer-cache cleanup retaining the current delta base.
+The first migration from old compressed packaging can require a full download.
+See docs/releases/v1.0.7.md for the measured test scope and limitations.
 
-Windows hotspot creation is controlled by Windows settings. Its Wi-Fi QR
-requires a supporting Windows 11 version. Native Wi-Fi Direct/Bluetooth,
-in-app frequency selection and separate transfer history remain pending.
-Physical-device acceptance and Windows Authenticode signing remain outstanding.
-See docs/releases/v1.0.6.md and docs/NATIVE_ROADMAP.md.
+Windows/Android versions remain coordinated and permanently Android-signed.
+Physical-device acceptance, Windows Authenticode, native Wi-Fi Direct/Bluetooth,
+separate transfer history and in-app band selection remain pending.

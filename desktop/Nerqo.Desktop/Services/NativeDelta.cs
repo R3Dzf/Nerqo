@@ -41,6 +41,8 @@ public static class NativeDelta
             using var digest = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
             ulong written = 0;
             byte[] scratch = new byte[MaxLiteral];
+            Span<byte> op = stackalloc byte[12];
+            Span<byte> sizes = stackalloc byte[8];
             while (true)
             {
                 int kind = patch.ReadByte();
@@ -52,7 +54,6 @@ public static class NativeDelta
                 }
                 if (kind == 'C')
                 {
-                    Span<byte> op = stackalloc byte[12];
                     patch.ReadExactly(op);
                     ulong offset = BinaryPrimitives.ReadUInt64BigEndian(op[..8]);
                     uint size = BinaryPrimitives.ReadUInt32BigEndian(op.Slice(8, 4));
@@ -73,7 +74,6 @@ public static class NativeDelta
                 }
                 if (kind == 'D')
                 {
-                    Span<byte> sizes = stackalloc byte[8];
                     patch.ReadExactly(sizes);
                     uint rawLength = BinaryPrimitives.ReadUInt32BigEndian(sizes[..4]);
                     uint compressedLength = BinaryPrimitives.ReadUInt32BigEndian(sizes.Slice(4, 4));

@@ -49,7 +49,7 @@ class NativeSigningTests(unittest.TestCase):
         self.assertTrue(all((w, i, a)))
         self.assertEqual(w.group(1), i.group(1))
         self.assertEqual(w.group(1), a.group(1))
-        self.assertIn("versionCode = 10006", gradle)
+        self.assertIn("versionCode = 10007", gradle)
 
     def test_native_signed_release_verification(self):
         wf = (ROOT / ".github/workflows/release.yml").read_text()

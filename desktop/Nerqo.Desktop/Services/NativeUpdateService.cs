@@ -25,11 +25,23 @@ public static class NativeUpdateService
     private static HttpClient CreateClient()
     {
         var client = new HttpClient { Timeout = TimeSpan.FromMinutes(10) };
-        client.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("Nerqo-Native", "1.0.6"));
+        client.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("Nerqo-Native", "1.0.7"));
         client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/vnd.github+json"));
         return client;
     }
 
+    public static void CleanupOlderCachedInstallers(string folder, Version installed)
+    {
+        if (!Directory.Exists(folder)) return;
+        installed = new Version(installed.Major, installed.Minor, Math.Max(0, installed.Build));
+        foreach (string path in Directory.EnumerateFiles(folder, "Nerqo-Windows-Setup-*.exe"))
+        {
+            var match = Regex.Match(Path.GetFileName(path), @"^Nerqo-Windows-Setup-(\d+\.\d+\.\d+)\.exe$");
+            if (!match.Success || !Version.TryParse(match.Groups[1].Value, out var version) || version >= installed) continue;
+            try { File.Delete(path); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+        }
+    }
     public static bool IsNewerVersion(string tag, Version installed)
     {
         if (!Regex.IsMatch(tag, @"^v\d+\.\d+\.\d+$", RegexOptions.CultureInvariant))
