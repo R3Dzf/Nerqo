@@ -420,9 +420,23 @@ public sealed class LanHost : IAsyncDisposable
         {
             if (Authorize(ctx) is not { } peer) return Unauthorized();
             ValidId(id);
+            string expectedHash = ctx.Request.Query["sha256"].ToString();
+            if (!Regex.IsMatch(expectedHash, "^[a-fA-F0-9]{64}$"))
+                return Results.BadRequest();
             lock (gate)
             {
-                if (!state.Uploads.TryGetValue(id, out var t) || t.Owner != Digest(Bearer(ctx)!) || t.Offset != t.Size || new FileInfo(Part(id)).Length != t.Size) return Results.Conflict();
+                if (!state.Uploads.TryGetValue(id, out var t) || t.Owner != Digest(Bearer(ctx)!) || t.Offset != t.Size || !File.Exists(Part(id)) || new FileInfo(Part(id)).Length != t.Size) return Results.Conflict();
+                string hash;
+                using (var read = File.OpenRead(Part(id))) hash = Hex(SHA256.HashData(read));
+                if (!hash.Equals(expectedHash, StringComparison.OrdinalIgnoreCase))
+                {
+                    // Never publish a mixed file after the source was changed
+                    // while a transfer was suspended. Force a fresh session.
+                    state.Uploads.Remove(id);
+                    File.Delete(Part(id));
+                    Save();
+                    return Results.UnprocessableEntity();
+                }
                 string target;
                 if (t.FolderId.Length > 0)
                 {
@@ -440,7 +454,6 @@ public sealed class LanHost : IAsyncDisposable
                     if (File.Exists(finalPath)) File.Move(finalPath, Part(id));
                     throw;
                 }
-                string hash; using (var read = File.OpenRead(finalPath)) hash = Hex(SHA256.HashData(read));
                 var item = new TransferItem { Id = id, Kind = "file", Sender = peer.Name,
                     Content = t.FolderId.Length > 0 ? t.RelativePath : t.Name,
                     FolderId = t.FolderId, Size = t.Size, Sha256 = hash };

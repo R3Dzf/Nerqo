@@ -246,12 +246,18 @@ internal object NativeClient {
         val id = transfer.getString("id")
         var offset = transfer.getLong("offset")
         if (allowResume) prefs.edit().putString(key, id).apply()
+        val wholeFileDigest = MessageDigest.getInstance("SHA-256")
         resolver.openInputStream(uri)?.use { input ->
+            // Read and hash the already-transferred prefix too. A document
+            // provider may not implement InputStream.skip(), and hashing the
+            // prefix detects changed files after a suspended upload.
             var skipped = 0L
+            val prefix = ByteArray(256 * 1024)
             while (skipped < offset) {
-                val n = input.skip(offset - skipped)
-                if (n <= 0) throw IOException("Cannot resume file at expected offset")
-                skipped += n
+                val read = input.read(prefix, 0, minOf(prefix.size.toLong(), offset - skipped).toInt())
+                if (read <= 0) throw IOException("Cannot resume: source file was shortened")
+                wholeFileDigest.update(prefix, 0, read)
+                skipped += read
             }
             val buffer = ByteArray(MAX_CHUNK)
             while (offset < size) {
@@ -270,10 +276,13 @@ internal object NativeClient {
                 conn.setRequestProperty("X-SHA256", sha(buffer.copyOf(used)))
                 conn.outputStream.use { it.write(buffer, 0, used) }
                 offset = response(conn).getLong("offset")
+                wholeFileDigest.update(buffer, 0, used)
                 progress(offset, size)
             }
         } ?: throw IOException("Cannot open selected file")
-        postJson(device.endpoint, "/api/transfers/$id/finish", JSONObject(), token)
+        val expectedFileHash = shaDigest(wholeFileDigest)
+        postJson(device.endpoint, "/api/transfers/$id/finish?sha256=" + expectedFileHash,
+            JSONObject(), token)
         if (allowResume) prefs.edit().remove(key).apply()
     }
     fun download(context: Context, device: Device, token: String, item: SharedEntry, target: Uri, progress: (Long, Long) -> Unit) {
