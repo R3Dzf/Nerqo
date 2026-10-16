@@ -113,6 +113,25 @@ static void TestNativeDelta()
 }
 TestNativeDelta();
 
+// Reproduce a receiver startup failure, then retry on the same host after the port is freed.
+await using (var retryHost = new LanHost())
+{
+    var blocker = new System.Net.Sockets.TcpListener(System.Net.IPAddress.IPv6Any, LanHost.Port);
+    blocker.Server.DualMode = true;
+    blocker.Server.ExclusiveAddressUse = true;
+    bool addressInUse = false;
+    blocker.Start();
+    try
+    {
+        try { await retryHost.StartAsync(); }
+        catch (IOException ex) when (ex.InnerException is Microsoft.AspNetCore.Connections.AddressInUseException)
+        { addressInUse = true; }
+    }
+    finally { blocker.Stop(); }
+    if (!addressInUse) throw new Exception("Occupied receiver port did not produce the expected startup failure");
+    await retryHost.StartAsync();
+}
+
 await using var host = new LanHost();
 await host.StartAsync();
 await using (var secondInstance = new LanHost())

@@ -1,10 +1,17 @@
 # Nerqo native implementation status
 
-Stable LAN/hotspot channel: **1.0.4** on `main`. Development branch: `dev/native-5ghz-20261016`.
+Stable LAN/hotspot channel: **1.0.4** on `main`; **1.0.5** is being validated on `dev/native-5ghz-20261016`.
 This document records implementation and validation separately. A green build is
 not evidence of a successful transfer between physical Windows/Android devices.
 
 ## The nine agreed phases
+
+The 1.0.5 candidate limits Firewall rule diagnostics to attributable executable
+rules, prevents duplicate Windows instances, restores the running window on a
+second launch, and exposes receiver startup errors with retry and explicit
+diagnostic copying. The host smoke test reproduces an occupied TCP port and
+retries the same receiver after releasing it. Existing older tray instances must
+be exited once before the first launch of this update.
 
 | Phase | Implemented | Remaining |
 |---|---|---|
