@@ -3,6 +3,8 @@ package com.r3dzf.nerqo
 import androidx.annotation.DrawableRes
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -61,7 +63,7 @@ private fun bytes(size: Long): String = when {
 }
 
 @Composable internal fun NerqoScreen(
-    deviceName: String?, connected: Boolean, paired: Boolean, nearby: List<Device>, entries: List<SharedEntry>,
+    deviceName: String?, connected: Boolean, paired: Boolean, history: List<HistoryEntry>, nearby: List<Device>, entries: List<SharedEntry>,
     busy: Boolean, progress: Float, message: String, network: String, hotspotText: String,
     transfer: TransferUi?, onPause: () -> Unit, onResume: () -> Unit, onCancel: () -> Unit,
     shareText: String, manualIp: String, darkMode: Boolean,
@@ -73,8 +75,10 @@ private fun bytes(size: Long): String = when {
 ) {
     var page by rememberSaveable { mutableIntStateOf(if (paired) 0 else 1) }
     var manual by rememberSaveable { mutableStateOf(false) }
-    val labels = listOf("Transfers", "Devices", "Settings")
-    val icons = listOf(R.drawable.ic_transfer, R.drawable.ic_devices, R.drawable.ic_settings)
+    var historyQuery by rememberSaveable { mutableStateOf("") }
+    var historyStatus by rememberSaveable { mutableStateOf("All") }
+    val labels = listOf("Transfers", "Devices", "Settings", "History")
+    val icons = listOf(R.drawable.ic_transfer, R.drawable.ic_devices, R.drawable.ic_settings, R.drawable.ic_history)
     Scaffold(containerColor = MaterialTheme.colorScheme.background,
         bottomBar = {
             NavigationBar(containerColor = MaterialTheme.colorScheme.surface, tonalElevation = 0.dp) {
@@ -101,7 +105,7 @@ private fun bytes(size: Long): String = when {
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
                     Text(labels[page], fontSize = 30.sp, fontWeight = FontWeight.SemiBold)
-                    Caption(when (page) { 0 -> "From here to there. All on your network."; 1 -> "A secure connection starts here."; else -> "Make yourself at home." })
+                    Caption(when (page) { 0 -> "From here to there. All on your network."; 1 -> "A secure connection starts here."; 3 -> "Your transfers, remembered."; else -> "Make yourself at home." })
                 }
             }
             item {
@@ -157,7 +161,7 @@ private fun bytes(size: Long): String = when {
                         Button(onClick = onSendText, enabled = !busy && paired && shareText.isNotBlank(), modifier = Modifier.fillMaxWidth()) { Text("Send to Windows"); Spacer(Modifier.width(10.dp)); Symbol(R.drawable.ic_arrow) }
                     } }
                     item { Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Text("Activity", fontSize = 22.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                        Text("Available shares", fontSize = 22.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
                         TextButton(onClick = onRefresh, enabled = !busy && paired) { Text("Refresh") }
                     } }
                     if (entries.isEmpty()) item { Panel { Symbol(R.drawable.ic_transfer); Title("Nothing shared yet"); Caption("Your files and notes will appear here. Send a little something to get started.") } }
@@ -207,6 +211,30 @@ private fun bytes(size: Long): String = when {
                         }
                     } }
                 }
+                3 -> {
+                    item { Panel {
+                        Title("Transfer history")
+                        Caption("File and folder operations on this device. Up to 500 recent records are kept across app restarts. Available shares stay in Transfers.")
+                        OutlinedTextField(value = historyQuery, onValueChange = { historyQuery = it }, label = { Text("Search history") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            listOf("All", "Completed", "Paused", "Interrupted", "Cancelled").forEach { status ->
+                                FilterChip(selected = historyStatus == status, onClick = { historyStatus = status }, label = { Text(status) })
+                            }
+                        }
+                    } }
+                    val matches = history.filter { it.status !in listOf("Queued", "Running") && (historyStatus == "All" || it.status == historyStatus)
+                        && (it.title + " " + it.peer + " " + it.status).contains(historyQuery.trim(), ignoreCase = true) }
+                    if (matches.isEmpty()) item { Panel { Title("Nothing here yet"); Caption("Completed, paused, interrupted and cancelled transfers will appear here.") } }
+                    items(matches, key = { "history:" + it.id }) { entry -> Panel {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            Symbol(R.drawable.ic_history)
+                            Text(entry.title, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                        }
+                        Text(entry.status, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
+                        Caption(entry.direction + " · " + entry.peer + " · " + java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.SHORT, java.text.DateFormat.SHORT).format(java.util.Date(entry.updated)))
+                        if (entry.detail.isNotBlank()) Caption(entry.detail)
+                    } }
+                }
                 else -> {
                     item { Panel {
                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -236,7 +264,7 @@ private fun bytes(size: Long): String = when {
                         Title("Keep Nerqo up to date")
                         Caption("Updates use the internet. Your local transfers work offline.")
                         Button(onClick = onUpdates, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("Check for app updates") }
-                        Caption("Nerqo 1.0.7 · Windows + Android")
+                        Caption("Nerqo 1.0.8 · Windows + Android")
                     } }
                 }
             }

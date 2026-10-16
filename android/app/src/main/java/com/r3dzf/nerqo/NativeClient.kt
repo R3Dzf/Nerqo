@@ -165,6 +165,10 @@ internal object NativeClient {
     fun status(device: Device): JSONObject = response(connect(device.endpoint + "/api/status", "GET"))
     fun pair(device: Device, pin: String): String = postJson(device.endpoint, "/api/pair", JSONObject()
         .put("pin", pin).put("name", android.os.Build.MODEL)).getString("token")
+    fun confirmReception(device: Device, token: String, entry: SharedEntry, session: String) {
+        postJson(device.endpoint, "/api/receipts", JSONObject().put("id", entry.id).put("session", session)
+            .put("size", entry.size).put("sha256", entry.sha256), token)
+    }
     fun disconnect(device: Device, token: String) {
         postJson(device.endpoint, "/api/disconnect", JSONObject(), token)
     }

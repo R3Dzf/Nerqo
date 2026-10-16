@@ -1,7 +1,7 @@
 """Measure actual native payload changes using the delta-friendly Windows packaging.
 
-The old 1.0.6 payload is repackaged for this test only. This is NOT the published
-1.0.6 installer, and does not imply a small migration delta from its old format.
+The old 1.0.7 payload is repackaged for this test only. This is NOT the published
+1.0.7 installer, and does not imply a small migration delta from its old format.
 """
 from __future__ import annotations
 import argparse
@@ -47,7 +47,7 @@ def main():
                 raise ValueError('Installer delta reconstruction differs from target')
             ratio = patch.stat().st_size / args.target.stat().st_size
             report = {
-                'baseline_payload_version': '1.0.6',
+                'baseline_payload_version': '1.0.7',
                 'baseline_repackaged_for_test': True,
                 'target_installer_bytes': args.target.stat().st_size,
                 'delta_bytes': patch.stat().st_size,

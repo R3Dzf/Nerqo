@@ -21,6 +21,10 @@ public partial class MainWindow : Window
 {
     private readonly LanHost service = new();
     private System.Windows.Forms.NotifyIcon? tray;
+    private List<TransferHistoryEntry> displayedHistory = new();
+    private List<TransferItem> displayedShares = new();
+    private List<PairedDevice> displayedPeers = new();
+    private List<IncomingTransfer> displayedIncoming = new();
     private bool exiting;
     private bool preparing;
     private bool loadingTheme = true;
@@ -155,9 +159,14 @@ public partial class MainWindow : Window
     private void RefreshItems()
     {
         var entries = service.Items;
-        ItemList.ItemsSource = entries.Select(x => new ActivityRow(x)).ToList();
+        if (!displayedShares.SequenceEqual(entries)) { displayedShares = entries; ItemList.ItemsSource = entries.Select(x => new ActivityRow(x)).ToList(); }
         var peers = service.PairedDevices;
-        PeerList.ItemsSource = peers;
+        if (!displayedPeers.SequenceEqual(peers)) { displayedPeers = peers; PeerList.ItemsSource = peers; }
+        var incoming = service.Incoming;
+        if (!displayedIncoming.SequenceEqual(incoming)) { displayedIncoming = incoming; IncomingList.ItemsSource = incoming; }
+        EmptyIncomingLabel.Visibility = incoming.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        var history = service.History;
+        if (!displayedHistory.SequenceEqual(history)) { displayedHistory = history; RenderHistory(); }
         EmptyPeersLabel.Visibility = peers.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         EmptyItemsLabel.Visibility = entries.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         ItemCountLabel.Text = $"{entries.Count} items";
@@ -213,7 +222,12 @@ public partial class MainWindow : Window
                 {
                     Dispatcher.Invoke(() => FooterLabel.Text = "Preparing " + Path.GetFileName(path) + "…");
                     if (Directory.Exists(path)) await service.ShareFolderDirectAsync(path);
-                    else await service.ShareFileAsync(path);
+                    else await service.ShareFileAsync(path, progress: (done, total) => Dispatcher.BeginInvoke(new Action(() =>
+                    {
+                        OperationProgress.IsIndeterminate = false;
+                        OperationProgress.Value = total > 0 ? done * 100.0 / total : 100;
+                        FooterLabel.Text = $"Preparing {Path.GetFileName(path)} · {OperationProgress.Value:0}% · copying and verifying in one pass";
+                    })));
                 }
             });
             RefreshItems();
@@ -245,11 +259,12 @@ public partial class MainWindow : Window
         if (TransfersPage == null || sender is not System.Windows.Controls.RadioButton button) return;
         string page = button.Tag?.ToString() ?? "Transfers";
         TransfersPage.Visibility = page == "Transfers" ? Visibility.Visible : Visibility.Collapsed;
+        HistoryPage.Visibility = page == "History" ? Visibility.Visible : Visibility.Collapsed;
         DevicesPage.Visibility = page == "Devices" ? Visibility.Visible : Visibility.Collapsed;
         SettingsPage.Visibility = page == "Settings" ? Visibility.Visible : Visibility.Collapsed;
         PageTitle.Text = page;
         UpdateFirewallCardVisibility();
-        PageSubtitle.Text = page switch { "Devices" => "A secure connection starts here.", "Settings" => "A few things to make Nerqo yours.", _ => "A little closer. A lot easier to share." };
+        PageSubtitle.Text = page switch { "History" => "Your transfers, remembered.", "Devices" => "A secure connection starts here.", "Settings" => "A few things to make Nerqo yours.", _ => "A little closer. A lot easier to share." };
     }
     private void GoToDevices(object sender, RoutedEventArgs e) => DevicesNav.IsChecked = true;
     private void ChangeTheme(object sender, RoutedEventArgs e)
@@ -332,6 +347,22 @@ public partial class MainWindow : Window
         try { Process.Start(new ProcessStartInfo(target) { UseShellExecute = true }); }
         catch (Exception) { FooterLabel.Text = "Open Windows Settings → Privacy & security → Windows Security → Firewall & network protection."; }
     }
+    private sealed record HistoryRow(TransferHistoryEntry Entry)
+    {
+        public string Name => Entry.Name;
+        public string Detail => $"{Entry.Direction} · {Entry.Status} · {Entry.Peer} · {Entry.Size / 1048576.0:0.#} MB · {Entry.When.LocalDateTime:g}";
+    }
+    private void FilterHistory(object sender, RoutedEventArgs e) => RenderHistory();
+    private void RenderHistory()
+    {
+        if (HistoryList == null || HistorySearch == null || HistoryFilter == null) return;
+        string query = HistorySearch.Text.Trim();
+        string status = (HistoryFilter.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? "All";
+        var rows = displayedHistory.Where(x => (status == "All" || x.Status == status)
+            && (x.Name + " " + x.Peer + " " + x.Status).Contains(query, StringComparison.OrdinalIgnoreCase)).Select(x => new HistoryRow(x)).ToList();
+        HistoryList.ItemsSource = rows;
+        EmptyHistoryLabel.Visibility = rows.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+    }
     private sealed record ActivityRow(TransferItem Item)
     {
         public string Title => Item.Content;
@@ -354,7 +385,7 @@ public partial class MainWindow : Window
     {
         string output = Path.GetFullPath("ui-smoke");
         Directory.CreateDirectory(output);
-        foreach (var nav in new[] { TransferNav, DevicesNav, SettingsNav })
+        foreach (var nav in new[] { TransferNav, HistoryNav, DevicesNav, SettingsNav })
         {
             nav.IsChecked = true;
             await Dispatcher.InvokeAsync(() => { }, DispatcherPriority.ApplicationIdle);
@@ -411,7 +442,10 @@ public partial class MainWindow : Window
                 MessageBox.Show("You have the latest eligible Nerqo Windows version. Offline file transfer continues to work without internet.", "Nerqo updates", MessageBoxButton.OK, MessageBoxImage.Information);
                 return;
             }
-            if (MessageBox.Show($"Nerqo {release.Version} is available.\n\nDownload verified Windows installer ({(release.Delta?.Size ?? release.Size) / 1048576.0:0.0} MB{(release.Delta == null ? "" : " delta")}; full: {release.Size / 1048576.0:0.0} MB)? Your files and paired devices will be preserved.\n\nUpdates require internet. File transfers do not.", "Nerqo updates", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
+            string downloadDescription = release.Delta == null
+                ? $"Full download: {release.Size / 1048576.0:0.0} MB"
+                : $"Delta: {release.Delta.Size / 1048576.0:0.0} MB (full download: {release.Size / 1048576.0:0.0} MB)";
+            if (MessageBox.Show($"Nerqo {release.Version} is available.\n\nDownload verified Windows installer?\n{downloadDescription} Your files and paired devices will be preserved.\n\nUpdates require internet. File transfers do not.", "Nerqo updates", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
                 return;
             OperationProgress.IsIndeterminate = false;
             OperationProgress.Visibility = Visibility.Visible;

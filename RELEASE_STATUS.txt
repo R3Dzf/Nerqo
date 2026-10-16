@@ -1,10 +1,11 @@
-Nerqo native 1.0.7 Stable channel
+Nerqo native 1.0.8 Stable channel
 
-Delta-friendly Windows installer packaging; in-place replacement with running
-app closure; obsolete installer-cache cleanup retaining the current delta base.
-The first migration from old compressed packaging can require a full download.
-See docs/releases/v1.0.7.md for the measured test scope and limitations.
+Single-pass Windows snapshot preparation with SHA-256 and progress, a saved
+incoming upload queue, and separate persistent History on Windows and Android.
+Windows outgoing deliveries require best-effort verified-client receipts;
+old shares are not imported as completed transfers. Android history upserts
+paused/resumed jobs and retains the latest status across restarts.
 
-Windows/Android versions remain coordinated and permanently Android-signed.
-Physical-device acceptance, Windows Authenticode, native Wi-Fi Direct/Bluetooth,
-separate transfer history and in-app band selection remain pending.
+Delta-friendly installer packaging, in-place replacement, cached delta bases
+and permanent Android signing continue. All publication gates remain required.
+See docs/releases/v1.0.8.md for scope and physical-device validation limits.

@@ -54,7 +54,7 @@ jobs:
           $app = Start-Process -FilePath "$pwd/dist/Windows/Nerqo.exe" -ArgumentList '--ui-smoke' -PassThru
           if (-not $app.WaitForExit(60000)) { $app.Kill(); throw 'UI smoke timed out' }
           if ($app.ExitCode -ne 0) { throw "UI smoke exit: $($app.ExitCode)" }
-          foreach ($screen in @('Transfers', 'Devices', 'Settings', 'Transfers-dark', 'Settings-dark')) {
+          foreach ($screen in @('Transfers', 'History', 'Devices', 'Settings', 'Transfers-dark', 'Settings-dark')) {
             if (-not (Test-Path "ui-smoke/$screen.png")) { throw "Missing UI screenshot: $screen" }
           }
       - name: Test encrypted LAN transport, resumable files and folder recovery
@@ -79,8 +79,8 @@ jobs:
         timeout-minutes: 5
         shell: pwsh
         run: |
-          git fetch --depth 1 origin 84ef1449cf0bbfc0090b8828123f83d747540b64
-          git worktree add --detach previous-native 84ef1449cf0bbfc0090b8828123f83d747540b64
+          git fetch --depth 1 origin 79878cece398a77bd679904812599e4b31115cc1
+          git worktree add --detach previous-native 79878cece398a77bd679904812599e4b31115cc1
           dotnet publish previous-native/desktop/Nerqo.Desktop/Nerqo.Desktop.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:PublishReadyToRun=false -o previous-native/dist/Windows
           if ($LASTEXITCODE -ne 0) { throw 'Previous native publish failed' }
           & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" previous-native/installer/Nerqo.iss

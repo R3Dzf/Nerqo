@@ -23,6 +23,7 @@ public sealed class TransferItem
     public string Id { get; set; } = "";
     public string Kind { get; set; } = "";
     public string Sender { get; set; } = "";
+    public bool LocalShare { get; set; }
     public string Content { get; set; } = "";
     public long Size { get; set; }
     public string Sha256 { get; set; } = "";
@@ -53,6 +54,12 @@ internal sealed class FolderRecord
 }
 public sealed record OutgoingFolderFile(string Path, long Size, string Sha256);
 internal sealed record OutgoingFolder(string Root, string Name, List<string> Directories, Dictionary<string, OutgoingFolderFile> Files);
+public sealed record TransferHistoryEntry(string Key, string Name, string Peer, string Direction, string Status, long Size, DateTimeOffset When);
+public sealed record IncomingTransfer(string Name, long Done, long Size)
+{
+    public double Percent => Size > 0 ? Math.Clamp(Done * 100.0 / Size, 0, 100) : 0;
+    public string Detail => $"{Done / 1048576.0:0.#} / {Size / 1048576.0:0.#} MB received";
+}
 public sealed record PairedDevice(string TokenHash, string Name, DateTimeOffset Expires);
 internal sealed class PeerRecord
 {
@@ -67,6 +74,7 @@ internal sealed class PersistedData
     public Dictionary<string, FolderRecord> Folders { get; set; } = new();
     public Dictionary<string, OutgoingFolder> OutgoingFolders { get; set; } = new();
     public List<TransferItem> Items { get; set; } = new();
+    public List<TransferHistoryEntry> History { get; set; } = new();
 }
 
 /// <summary>Pure .NET, in-process LAN transfer service. No Python, shell or embedded web browser.</summary>
@@ -93,6 +101,14 @@ public sealed class LanHost : IAsyncDisposable
     public event Action? Changed;
     public List<TransferItem> Items { get { lock (gate) return state.Items.OrderByDescending(x => x.Created).Take(150).Select(x => x).ToList(); } }
     public List<PairedDevice> PairedDevices { get { lock (gate) return state.Peers.Where(x => x.Value.Expires > DateTimeOffset.UtcNow).Select(x => new PairedDevice(x.Key, x.Value.Name, x.Value.Expires)).OrderBy(x => x.Name).ToList(); } }
+    public List<TransferHistoryEntry> History { get { lock (gate) return state.History.OrderByDescending(x => x.When).Take(500).ToList(); } }
+    public List<IncomingTransfer> Incoming { get { lock (gate) return state.Uploads.Values.Select(x => new IncomingTransfer(x.Name, x.Offset, x.Size)).ToList(); } }
+    private void RecordHistory(string key, string name, string peer, string direction, string status, long size)
+    {
+        if (state.History.Any(x => x.Key == key)) return;
+        state.History.Add(new(key, name, peer, direction, status, size, DateTimeOffset.UtcNow));
+        if (state.History.Count > 500) state.History.RemoveRange(0, state.History.Count - 500);
+    }
     public bool RevokePeer(string tokenHash)
     {
         if (!Regex.IsMatch(tokenHash, "^[a-f0-9]{64}$")) return false;
@@ -140,6 +156,7 @@ public sealed class LanHost : IAsyncDisposable
             try
             {
                 state = JsonSerializer.Deserialize<PersistedData>(File.ReadAllText(data)) ?? new();
+                state.History ??= new();
                 state.Folders ??= new();
                 state.CompletedUploads ??= new();
                 state.OutgoingFolders ??= new();
@@ -293,7 +310,7 @@ public sealed class LanHost : IAsyncDisposable
             catch (BadHttpRequestException e) { if (!ctx.Response.HasStarted) { ctx.Response.StatusCode = e.StatusCode; await ctx.Response.WriteAsJsonAsync(new { error = e.Message }); } }
             catch (JsonException) { if (!ctx.Response.HasStarted) { ctx.Response.StatusCode = 400; await ctx.Response.WriteAsJsonAsync(new { error = "Invalid JSON" }); } }
         });
-        app.MapGet("/api/status", (HttpContext ctx) => Results.Json(new { name = Environment.MachineName, authorized = Authorize(ctx) != null, port = Port, version = "1.0.7", transferProtocol = 2, band = WifiInspector.GetBand() }));
+        app.MapGet("/api/status", (HttpContext ctx) => Results.Json(new { name = Environment.MachineName, authorized = Authorize(ctx) != null, port = Port, version = "1.0.8", transferProtocol = 2, band = WifiInspector.GetBand() }));
         app.MapPost("/api/pair", async (HttpContext ctx) =>
         {
             string ip = ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown";
@@ -313,6 +330,24 @@ public sealed class LanHost : IAsyncDisposable
             if (Authorize(ctx) == null) return Unauthorized();
             RevokePeer(Digest(Bearer(ctx)!));
             return Results.Json(new { disconnected = true });
+        });
+        app.MapPost("/api/receipts", async (HttpContext ctx) =>
+        {
+            var peer = Authorize(ctx); if (peer == null) return Unauthorized();
+            using var doc = await ReadJson(ctx.Request, ctx.RequestAborted);
+            var body = doc.RootElement;
+            string id = Str(body, "id") ?? "";
+            if (!Guid.TryParse(Str(body, "session"), out var session)) return Results.BadRequest();
+            long size = body.TryGetProperty("size", out var supplied) && supplied.ValueKind == JsonValueKind.Number && supplied.TryGetInt64(out var bytes) ? bytes : -1;
+            string hash = Str(body, "sha256") ?? "";
+            lock (gate)
+            {
+                var item = state.Items.FirstOrDefault(x => x.Id == id && x.LocalShare && x.Kind is "file" or "folder");
+                if (item == null || item.Size != size || item.Sha256 != hash) return Results.BadRequest();
+                RecordHistory("sent:" + Digest(Bearer(ctx)!) + ":" + session.ToString("N"), item.Content, peer.Name, "Sent", "Completed", item.Size);
+                Save();
+            }
+            return Results.Json(new { confirmed = true });
         });
         app.MapGet("/api/items", (HttpContext ctx) => Authorize(ctx) == null ? Unauthorized() : Results.Json(new { items = Items }));
         app.MapPost("/api/items", async (HttpContext ctx) =>
@@ -473,6 +508,7 @@ public sealed class LanHost : IAsyncDisposable
                 {
                     // Never publish a mixed file after the source was changed
                     // while a transfer was suspended. Force a fresh session.
+                    RecordHistory("failed:" + id, t.Name, peer.Name, "Received", "Integrity failed", t.Size);
                     state.Uploads.Remove(id);
                     File.Delete(Part(id));
                     Save();
@@ -499,6 +535,7 @@ public sealed class LanHost : IAsyncDisposable
                     Content = t.FolderId.Length > 0 ? t.RelativePath : t.Name,
                     FolderId = t.FolderId, Size = t.Size, Sha256 = hash };
                 state.Items.Add(item);
+                RecordHistory("received:" + id, item.Content, peer.Name, "Received", "Completed", item.Size);
                 state.CompletedUploads[id] = new CompletedUploadRecord { Upload = t, Sha256 = hash };
                 state.Uploads.Remove(id); Save();
                 return Results.Json(new { id, name = t.Name, size = t.Size, sha256 = hash });
@@ -506,7 +543,7 @@ public sealed class LanHost : IAsyncDisposable
         });
         app.MapDelete("/api/transfers/{id}", (string id, HttpContext ctx) =>
         {
-            if (Authorize(ctx) == null) return Unauthorized();
+            var peer = Authorize(ctx); if (peer == null) return Unauthorized();
             ValidId(id);
             string owner = Digest(Bearer(ctx)!);
             lock (gate)
@@ -515,6 +552,7 @@ public sealed class LanHost : IAsyncDisposable
                     return done.Upload.Owner == owner ? Results.Json(new { complete = true }) : Results.StatusCode(403);
                 if (!state.Uploads.TryGetValue(id, out var upload)) return Results.NotFound();
                 if (upload.Owner != owner) return Results.StatusCode(403);
+                RecordHistory("cancelled:" + id, upload.Name, peer.Name, "Received", "Cancelled", upload.Size);
                 File.Delete(Part(id)); state.Uploads.Remove(id); Save();
                 return Results.Json(new { cancelled = true });
             }
@@ -575,16 +613,42 @@ public sealed class LanHost : IAsyncDisposable
         while (File.Exists(path)) path = Path.Combine(ReceivedDirectory, $"{baseName} ({i++}){ext}");
         return path;
     }
-    public async Task ShareFileAsync(string path, CancellationToken ct = default)
+    public async Task ShareFileAsync(string path, CancellationToken ct = default, Action<long, long>? progress = null)
     {
-        var original = new FileInfo(path);
-        string name = ValidName(original.Name), id = Id();
+        string name = ValidName(Path.GetFileName(path)), id = Id();
         string dest = Path.Combine(StorageDirectory, id + ".bin");
-        await using (var src = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 1024 * 1024, true))
-        await using (var target = new FileStream(dest, FileMode.CreateNew, FileAccess.Write, FileShare.None, 1024 * 1024, true))
-            await src.CopyToAsync(target, 1024 * 1024, ct);
-        string hash; using (var data = File.OpenRead(dest)) hash = Hex(SHA256.HashData(data));
-        lock (gate) { state.Items.Add(new TransferItem { Id = id, Kind = "file", Sender = "Windows", Content = name, Size = original.Length, Sha256 = hash }); Save(); }
+        bool complete = false;
+        try
+        {
+            string hash; long size;
+            await using (var src = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 1024 * 1024, true))
+            {
+                size = src.Length;
+                if (size > MaxFile) throw new IOException("File exceeds the supported size limit");
+                using var digest = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+                await using (var target = new FileStream(dest, FileMode.CreateNew, FileAccess.Write, FileShare.None, 1024 * 1024, true))
+                {
+                    byte[] buffer = new byte[1024 * 1024]; long done = 0; int lastPercent = -1;
+                    progress?.Invoke(0, size);
+                    while (true)
+                    {
+                        int read = await src.ReadAsync(buffer, ct);
+                        if (read == 0) break;
+                        await target.WriteAsync(buffer.AsMemory(0, read), ct);
+                        digest.AppendData(buffer, 0, read); done += read;
+                        int percent = size > 0 ? (int)Math.Min(100, done * 100 / size) : 100;
+                        if (percent != lastPercent) { progress?.Invoke(done, size); lastPercent = percent; }
+                    }
+                    if (done != size) throw new IOException("The source changed during preparation");
+                    await target.FlushAsync(ct);
+                    hash = Hex(digest.GetHashAndReset());
+                }
+            }
+            complete = true;
+            lock (gate) { state.Items.Add(new TransferItem { Id = id, Kind = "file", Sender = "Windows", LocalShare = true, Content = name, Size = size, Sha256 = hash }); Save(); }
+            progress?.Invoke(size, size);
+        }
+        finally { if (!complete && File.Exists(dest)) File.Delete(dest); }
     }
     /// <summary>
     /// Share a complete folder as a stream-created ZIP archive, preserving nested
@@ -640,7 +704,7 @@ public sealed class LanHost : IAsyncDisposable
             state.OutgoingFolders[id] = share;
             state.Items.Add(new TransferItem
             {
-                Id = id, Kind = "folder", Sender = "Windows",
+                Id = id, Kind = "folder", Sender = "Windows", LocalShare = true,
                 Content = folderName, Size = total,
             });
             Save();
@@ -708,7 +772,7 @@ public sealed class LanHost : IAsyncDisposable
             {
                 state.Items.Add(new TransferItem
                 {
-                    Id = id, Kind = "file", Sender = "Windows", Content = display,
+                    Id = id, Kind = "file", Sender = "Windows", LocalShare = true, Content = display,
                     Size = size, Sha256 = digest
                 });
                 Save();
@@ -725,7 +789,7 @@ public sealed class LanHost : IAsyncDisposable
     {
         if (string.IsNullOrWhiteSpace(content) || Encoding.UTF8.GetByteCount(content) > 32768) throw new ArgumentException("Text must be 1–32768 bytes.");
         string kind = Uri.TryCreate(content.Trim(), UriKind.Absolute, out var link) && link.Scheme is ("http" or "https") ? "link" : "text";
-        lock (gate) { state.Items.Add(new TransferItem { Id = Id(), Kind = kind, Sender = "Windows", Content = content.Trim() }); Save(); }
+        lock (gate) { state.Items.Add(new TransferItem { Id = Id(), Kind = kind, Sender = "Windows", LocalShare = true, Content = content.Trim() }); Save(); }
     }
     private async Task RunDiscovery(CancellationToken ct)
     {

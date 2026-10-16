@@ -112,6 +112,8 @@ expected = bytes(range(256)) * (32 * 4096) + b'ui'
 if hashlib.sha256(received).digest() != hashlib.sha256(expected).digest():
     raise RuntimeError('UI-resumed document does not match the TLS source')
 (OUTPUT / 'transfer-verification.txt').write_text('PASS: restored download; native Pause/Resume; final size and SHA-256 match source.\n')
+tap('History')
+capture('History')
 tap('Settings')
 capture('Settings')
 tap('Dark appearance', 'content-desc')

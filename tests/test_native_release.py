@@ -11,7 +11,7 @@ from nerqo.delta import apply_delta
 class NativeReleaseTests(unittest.TestCase):
     def test_version_lockstep(self):
         project = Path(__file__).resolve().parents[1]
-        check_versions(project, "1.0.7")
+        check_versions(project, "1.0.8")
         with self.assertRaises(ValueError):
             check_versions(project, "0.5.0")
 

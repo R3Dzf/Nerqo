@@ -417,6 +417,49 @@ try
 }
 finally { if (Directory.Exists(directSource)) Directory.Delete(directSource, true); }
 
+// Preparation hashes the exact snapshot while copying; changing the source afterwards cannot change a share.
+string preparedSource = Path.Combine(Path.GetTempPath(), "NerqoPrepare-" + Guid.NewGuid().ToString("N") + ".bin");
+string cancelledSource = preparedSource + ".cancelled";
+try
+{
+    byte[] preparationBytes = RandomNumberGenerator.GetBytes(3 * 1024 * 1024 + 33);
+    await File.WriteAllBytesAsync(preparedSource, preparationBytes);
+    var reports = new List<long>();
+    await host.ShareFileAsync(preparedSource, progress: (done, _) => reports.Add(done));
+    var prepared = host.Items.Single(x => x.Content == Path.GetFileName(preparedSource));
+    if (prepared.Sha256 != Convert.ToHexString(SHA256.HashData(preparationBytes)).ToLowerInvariant()
+        || reports.Count < 2 || reports[^1] != preparationBytes.Length || !reports.SequenceEqual(reports.Order()))
+        throw new Exception("Single-pass snapshot checksum or progress is incorrect");
+    if (host.History.Any(x => x.Name == prepared.Content)) throw new Exception("An available share was falsely logged as delivered");
+    await File.WriteAllTextAsync(preparedSource, "Source changed after preparation");
+    if (!(await client.GetByteArrayAsync($"/api/files/{prepared.Id}")).SequenceEqual(preparationBytes))
+        throw new Exception("Prepared file snapshot changed with the source");
+    string receiptSession = Guid.NewGuid().ToString();
+    var receipt = new { id = prepared.Id, session = receiptSession, size = prepared.Size, sha256 = prepared.Sha256 };
+    var wrongReceipt = await client.PostAsJsonAsync("/api/receipts", new { id = prepared.Id, session = receiptSession, size = prepared.Size, sha256 = new string('0', 64) });
+    if (wrongReceipt.StatusCode != System.Net.HttpStatusCode.BadRequest) throw new Exception("Wrong receipt hash was accepted");
+    (await client.PostAsJsonAsync("/api/receipts", receipt)).EnsureSuccessStatusCode();
+    (await client.PostAsJsonAsync("/api/receipts", receipt)).EnsureSuccessStatusCode();
+    if (host.History.Count(x => x.Name == prepared.Content && x.Direction == "Sent") != 1)
+        throw new Exception("Repeated receipt duplicated transfer history");
+    var forged = await client.PostAsJsonAsync("/api/receipts", new { id, session = Guid.NewGuid().ToString(), size = uploaded.Length, sha256 = Convert.ToHexString(SHA256.HashData(uploaded)).ToLowerInvariant() });
+    if (forged.StatusCode != System.Net.HttpStatusCode.BadRequest) throw new Exception("A received file was falsely marked as a local delivery");
+    await using (var restored = new LanHost())
+        if (!restored.History.Any(x => x.Name == prepared.Content && x.Direction == "Sent" && x.Status == "Completed")
+            || !restored.History.Any(x => x.Key == "received:" + id && x.Status == "Completed"))
+            throw new Exception("Transfer history did not survive loading saved state");
+    await File.WriteAllBytesAsync(cancelledSource, preparationBytes);
+    var beforeCancel = Directory.GetFiles(host.StorageDirectory).ToHashSet();
+    using var cancellation = new CancellationTokenSource();
+    bool cancelled = false;
+    try { await host.ShareFileAsync(cancelledSource, cancellation.Token, (done, _) => { if (done >= 1024 * 1024) cancellation.Cancel(); }); }
+    catch (OperationCanceledException) { cancelled = true; }
+    if (!cancelled || host.Items.Any(x => x.Content == Path.GetFileName(cancelledSource))
+        || Directory.GetFiles(host.StorageDirectory).Any(x => !beforeCancel.Contains(x)))
+        throw new Exception("Cancelled preparation published a share or left a partial snapshot");
+}
+finally { File.Delete(preparedSource); File.Delete(cancelledSource); }
+
 using (var anonymous = new HttpClient(handler, disposeHandler: false) { BaseAddress = client.BaseAddress })
     if ((await anonymous.PostAsJsonAsync("/api/disconnect", new {})).StatusCode != System.Net.HttpStatusCode.Unauthorized)
         throw new Exception("Unauthenticated disconnect was accepted");

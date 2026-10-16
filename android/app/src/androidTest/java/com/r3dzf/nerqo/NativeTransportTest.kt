@@ -39,6 +39,18 @@ class NativeTransportTest {
     private fun pauseAtFourMiB(control: TransferControl, done: Long) {
         if(done >= 4L * 1024 * 1024) control.interrupt(TransferStop.PAUSE)
     }
+    @Test fun test00HistorySurvivesReloadWithoutDuplicatingResumedJobs() {
+        val job = TransferJob(kind = "downloadFile", title = "History persistence fixture", host = device.address,
+            port = device.port, deviceName = device.name, fingerprint = "0".repeat(64))
+        assertTrue(TransferHistory.record(context, job, "Running"))
+        assertTrue(TransferHistory.record(context, job, "Paused"))
+        assertTrue(TransferHistory.record(context, job, "Running"))
+        assertTrue(TransferHistory.record(context, job, "Completed"))
+        val loaded = TransferHistory.load(context).filter { it.id == job.id }
+        assertEquals(1, loaded.size)
+        assertEquals("Completed", loaded.single().status)
+        assertEquals("Received", loaded.single().direction)
+    }
     @Test fun test00ScannerIsPortraitAndPrivate() {
         val info = context.packageManager.getActivityInfo(android.content.ComponentName(context, PortraitCaptureActivity::class.java), 0)
         assertEquals(android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT, info.screenOrientation)

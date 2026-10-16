@@ -58,6 +58,8 @@ class MainActivity : ComponentActivity() {
     private var sessionGeneration = 0
     private var polling = false
     private val executor = Executors.newSingleThreadExecutor()
+    private val receiptExecutor = Executors.newSingleThreadExecutor()
+    private var history by mutableStateOf<List<HistoryEntry>>(emptyList())
     private var connected by mutableStateOf(false)
     private var darkMode by mutableStateOf(false)
     private var device by mutableStateOf<Device?>(null)
@@ -84,8 +86,12 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         darkMode = prefs.getBoolean("dark_mode", false)
+        history = TransferHistory.load(this)
         pendingTransfer = TransferJob.load(this)
-        pendingTransfer?.let { transferUi = TransferUi(it.title, paused = true, detail = "Interrupted transfer · Ready to resume") }
+        pendingTransfer?.let {
+            transferUi = TransferUi(it.title, paused = true, detail = "Interrupted transfer · Ready to resume")
+            if (history.none { entry -> entry.id == it.id && entry.status == "Completed" }) rememberTransfer(it, "Paused", "Restored after app restart")
+        }
         val host = prefs.getString("host", "") ?: ""
         val storedPort = prefs.getInt("port", 44888)
         if (isPrivateIPv4(host)) {
@@ -255,6 +261,14 @@ class MainActivity : ComponentActivity() {
         val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or (if (write) Intent.FLAG_GRANT_WRITE_URI_PERMISSION else 0)
         runCatching { contentResolver.takePersistableUriPermission(uri, flags) }
     }
+    private fun rememberTransfer(job: TransferJob, status: String, detail: String = "") {
+        val saved = runCatching { TransferHistory.record(this, job, status, detail) }.getOrDefault(false)
+        val fresh = TransferHistory.load(this)
+        runOnUiThread { if (!isDestroyed) {
+            history = fresh
+            if (!saved) Toast.makeText(this, "Could not save transfer history", Toast.LENGTH_SHORT).show()
+        } }
+    }
     private fun createTransfer(kind: String, title: String, uris: List<Uri> = emptyList(),
                                target: Uri? = null, entry: SharedEntry? = null) {
         if (pendingTransfer != null || busy) { message = "Resume or cancel the current transfer first"; return }
@@ -268,6 +282,7 @@ class MainActivity : ComponentActivity() {
             target = target?.toString() ?: "", entry = entry)
         try {
             job.save(this); pendingTransfer = job
+            rememberTransfer(job, "Queued")
             transferUi = TransferUi(job.title, paused = true, detail = "Ready to start")
             resumeTransfer()
         }
@@ -310,6 +325,7 @@ class MainActivity : ComponentActivity() {
         executor.execute {
             val destination = Device(job.deviceName, job.host, job.port)
             val access = prefs.getString("token_${job.host}", null)
+            rememberTransfer(job, "Running")
             try {
                 bindLocalNetwork()
                 if (cancelOnly) throw TransferCancelled()
@@ -378,14 +394,21 @@ class MainActivity : ComponentActivity() {
                     }
                 }
                 TransferJob.clear(this)
+                rememberTransfer(job, "Completed")
+                if (job.kind.startsWith("download") && job.entry != null) runCatching {
+                    receiptExecutor.execute { runCatching { NativeClient.confirmReception(destination, access, job.entry, job.id) } }
+                }
                 runCatching { NativeClient.cleanSession(this, destination, access, job.id, cancel = false) }
                 runOnUiThread { if (!isDestroyed) { pendingTransfer = null; transferUi = null; message = "Transfer completed and SHA-256 verified" } }
             } catch (error: Exception) {
                 if (cancelOnly || control.stop == TransferStop.CANCEL || error is TransferCancelled) {
-                    NativeClient.cleanSession(this, destination, access, job.id, cancel = true)
+                    runCatching { NativeClient.cleanSession(this, destination, access, job.id, cancel = true) }
                     TransferJob.clear(this)
+                    rememberTransfer(job, "Cancelled")
                     runOnUiThread { if (!isDestroyed) { pendingTransfer = null; transferUi = null; message = "Transfer cancelled. Completed files were kept." } }
                 } else {
+                    val paused = control.stop == TransferStop.PAUSE || error is TransferPaused
+                    rememberTransfer(job, if (paused) "Paused" else "Interrupted", if (paused) "" else error.message ?: "Transfer interrupted")
                     runOnUiThread { if (!isDestroyed) {
                         transferUi = (transferUi ?: TransferUi(job.title)).copy(paused = true, detail = if (control.stop == TransferStop.PAUSE || error is TransferPaused) "Paused · Resume from the saved checkpoint" else "Interrupted · " + (error.message ?: "Try again"))
                         message = "Transfer saved. You can resume it or cancel."
@@ -582,6 +605,7 @@ class MainActivity : ComponentActivity() {
         (getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager).bindProcessToNetwork(null)
         pendingWifiQr = null
         wifiRequest?.let { runCatching { (getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager).unregisterNetworkCallback(it) } }
+        receiptExecutor.shutdownNow()
         executor.shutdownNow()
         super.onDestroy()
     }
@@ -614,7 +638,7 @@ class MainActivity : ComponentActivity() {
         }
         NerqoTheme(darkMode) {
             NerqoScreen(
-                deviceName = device?.name, connected = connected, paired = token != null,
+                deviceName = device?.name, connected = connected, paired = token != null, history = history,
                 nearby = nearby, entries = entries, busy = busy, progress = progress,
                 message = message, network = wifiText(), hotspotText = hotspotText,
                 transfer = transferUi, onPause = ::pauseTransfer,
