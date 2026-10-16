@@ -220,8 +220,9 @@ public partial class MainWindow : Window
             {
                 foreach (var path in paths)
                 {
-                    Dispatcher.Invoke(() => FooterLabel.Text = "Preparing " + Path.GetFileName(path) + "…");
-                    if (Directory.Exists(path)) await service.ShareFolderDirectAsync(path);
+                    bool folder = Directory.Exists(path);
+                    Dispatcher.Invoke(() => { FooterLabel.Text = "Preparing " + Path.GetFileName(path) + "…"; OperationProgress.IsIndeterminate = folder; OperationProgress.Value = 0; });
+                    if (folder) await service.ShareFolderDirectAsync(path);
                     else await service.ShareFileAsync(path, progress: (done, total) => Dispatcher.BeginInvoke(new Action(() =>
                     {
                         OperationProgress.IsIndeterminate = false;
@@ -263,6 +264,7 @@ public partial class MainWindow : Window
         DevicesPage.Visibility = page == "Devices" ? Visibility.Visible : Visibility.Collapsed;
         SettingsPage.Visibility = page == "Settings" ? Visibility.Visible : Visibility.Collapsed;
         PageTitle.Text = page;
+        PageScroll?.ScrollToTop();
         UpdateFirewallCardVisibility();
         PageSubtitle.Text = page switch { "History" => "Your transfers, remembered.", "Devices" => "A secure connection starts here.", "Settings" => "A few things to make Nerqo yours.", _ => "A little closer. A lot easier to share." };
     }
@@ -287,7 +289,7 @@ public partial class MainWindow : Window
     private void UpdateFirewallCardVisibility()
     {
         if (FirewallCard == null) return;
-        FirewallCard.Visibility = connectionError.Length == 0 && firewallStatus?.State == "ready" && TransfersPage.Visibility == Visibility.Visible
+        FirewallCard.Visibility = connectionError.Length == 0 && firewallStatus?.State == "ready" && (TransfersPage.Visibility == Visibility.Visible || HistoryPage.Visibility == Visibility.Visible)
             ? Visibility.Collapsed : Visibility.Visible;
     }
     private void UpdateFirewallHeader()

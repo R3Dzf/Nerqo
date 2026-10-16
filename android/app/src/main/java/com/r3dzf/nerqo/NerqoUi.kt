@@ -7,6 +7,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -77,6 +78,8 @@ private fun bytes(size: Long): String = when {
     var manual by rememberSaveable { mutableStateOf(false) }
     var historyQuery by rememberSaveable { mutableStateOf("") }
     var historyStatus by rememberSaveable { mutableStateOf("All") }
+    val listState = rememberLazyListState()
+    LaunchedEffect(page) { listState.scrollToItem(0) }
     val labels = listOf("Transfers", "Devices", "Settings", "History")
     val icons = listOf(R.drawable.ic_transfer, R.drawable.ic_devices, R.drawable.ic_settings, R.drawable.ic_history)
     Scaffold(containerColor = MaterialTheme.colorScheme.background,
@@ -88,7 +91,7 @@ private fun bytes(size: Long): String = when {
             }
         }
     ) { inset ->
-        LazyColumn(Modifier.fillMaxSize().padding(inset).imePadding(),
+        LazyColumn(state = listState, modifier = Modifier.fillMaxSize().padding(inset).imePadding(),
             contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 18.dp, bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)) {
             item {
