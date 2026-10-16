@@ -8,7 +8,7 @@ internal class TransferPaused : IOException("Transfer paused")
 internal class TransferCancelled : IOException("Transfer cancelled")
 
 /** Cooperative checkpoints plus immediate interruption of an active network request. */
-internal class TransferControl {
+internal class TransferControl(private val onPhase: (String) -> Unit = {}) {
     @Volatile var stop: TransferStop? = null
         private set
     private val gate = Any()
@@ -21,6 +21,7 @@ internal class TransferControl {
         }
         actions.forEach { runCatching(it) }
     }
+    fun phase(label: String) { onPhase(label) }
     fun checkpoint() {
         when (stop) {
             TransferStop.PAUSE -> throw TransferPaused()

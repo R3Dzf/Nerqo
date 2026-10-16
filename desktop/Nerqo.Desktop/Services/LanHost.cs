@@ -331,8 +331,10 @@ public sealed class LanHost : IAsyncDisposable
             {
                 if (resume != null)
                 {
+                    if (state.Folders.TryGetValue(resume, out var claimed) && claimed.Owner != owner)
+                        return Results.StatusCode(403);
                     if (!state.Folders.TryGetValue(resume, out var existing)
-                        || existing.Owner != owner || existing.Name != name
+                        || existing.Name != name
                         || !Directory.Exists(Path.Combine(ReceivedDirectory, existing.DirectoryName)))
                         return Results.Conflict();
                     return Results.Json(new { id = resume, name = existing.Name });
@@ -395,14 +397,16 @@ public sealed class LanHost : IAsyncDisposable
                 if (resume != null && state.CompletedUploads.TryGetValue(resume, out var receipt))
                 {
                     var saved = receipt.Upload;
-                    if (saved.Owner != owner || saved.Name != name || saved.Size != size || saved.FolderId != folderId || saved.RelativePath != relative)
+                    if (saved.Owner != owner) return Results.StatusCode(403);
+                    if (saved.Name != name || saved.Size != size || saved.FolderId != folderId || saved.RelativePath != relative)
                         return Results.Conflict();
                     if (!File.Exists(Path.Combine(StorageDirectory, resume + ".bin"))) return Results.StatusCode(410);
                     return Results.Json(new { id = resume, complete = true, sha256 = receipt.Sha256, size });
                 }
                 if (resume != null && state.Uploads.TryGetValue(resume, out var existing))
                 {
-                    if (existing.Owner != owner || existing.Name != name || existing.Size != size || existing.FolderId != folderId || existing.RelativePath != relative) return Results.Conflict();
+                    if (existing.Owner != owner) return Results.StatusCode(403);
+                    if (existing.Name != name || existing.Size != size || existing.FolderId != folderId || existing.RelativePath != relative) return Results.Conflict();
                     string part = Part(resume);
                     if (!File.Exists(part)) return Results.Conflict();
                     existing.Offset = Math.Min(existing.Offset, new FileInfo(part).Length);

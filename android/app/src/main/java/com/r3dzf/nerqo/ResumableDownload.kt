@@ -33,6 +33,7 @@ internal object ResumableDownload {
         var digest = MessageDigest.getInstance("SHA-256")
         fun hashPrefix() {
             if (offset == 0L) return
+            control.phase("Verifying the saved download before resuming…")
             target.read().use { input ->
                 val block = ByteArray(256 * 1024)
                 var count = 0L

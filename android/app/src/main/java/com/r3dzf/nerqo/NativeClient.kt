@@ -237,6 +237,7 @@ internal object NativeClient {
             transfer = postJson(device.endpoint, "/api/transfers/begin", fresh, token)
         }
         if (transfer.optBoolean("complete", false)) {
+            TransferControl.current.get()?.phase("Checking the already delivered file…")
             val expected = transfer.getString("sha256")
             val digest = MessageDigest.getInstance("SHA-256")
             resolver.openInputStream(uri)?.use { input ->
@@ -267,6 +268,7 @@ internal object NativeClient {
             // provider may not implement InputStream.skip(), and hashing the
             // prefix detects changed files after a suspended upload.
             var skipped = 0L
+            if (offset > 0L) TransferControl.current.get()?.phase("Verifying the source before resuming…")
             val prefix = ByteArray(256 * 1024)
             while (skipped < offset) {
                 TransferControl.check()

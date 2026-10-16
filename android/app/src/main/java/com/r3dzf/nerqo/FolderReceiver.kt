@@ -88,6 +88,7 @@ internal object FolderReceiver {
             if (existing != null) {
                 // Only skip a file finalized by this exact transfer into this destination.
                 // Never overwrite an unrelated user file, or trust a receipt without hashing.
+                TransferControl.current.get()?.phase("Verifying saved folder member: " + relative)
                 val owned = prefs.getString(receiptKey, null) == hash + "|" + existing.uri
                 val matches = owned && existing.isFile && context.contentResolver.openInputStream(existing.uri)?.use {
                     TransferIntegrity.matches(it, expectedSize, hash)

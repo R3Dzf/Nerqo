@@ -261,7 +261,9 @@ class MainActivity : ComponentActivity() {
         if (!TransferControl.workerActive.compareAndSet(false, true)) {
             message = "The previous transfer is still closing. Try Resume again shortly."; return
         }
-        val control = TransferControl()
+        val control = TransferControl { label ->
+            runOnUiThread { if (!isDestroyed && pendingTransfer?.id == job.id) transferUi = (transferUi ?: TransferUi(job.title)).copy(detail = label) }
+        }
         transferControl = control
         busy = true
         transferUi = TransferUi(job.title, detail = if (cancelOnly) "Cancelling…" else "Checking saved transfer…")

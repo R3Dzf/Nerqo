@@ -27,15 +27,9 @@ class NativeTransportTest {
     private fun uri(name: String) = DocumentsContract.buildDocumentUri(authority, "root/$name")
     private fun session() = UUID.randomUUID().toString()
     @Before fun trustKnownFixture() {
-        // Start our test-only provider as the document picker would. It grants
-        // this target app narrow test-storage access, then shell identity ends.
-        val automation = InstrumentationRegistry.getInstrumentation().uiAutomation
-        automation.adoptShellPermissionIdentity(android.Manifest.permission.MANAGE_DOCUMENTS)
-        try {
-            context.contentResolver.query(DocumentsContract.buildDocumentUri(authority, "root"), null, null, null, null)?.use {
-                assertTrue(it.moveToFirst())
-            } ?: error("Test storage did not start")
-        } finally { automation.dropShellPermissionIdentity() }
+        context.contentResolver.query(DocumentsContract.buildDocumentUri(authority, "root"), null, null, null, null)?.use {
+            assertTrue(it.moveToFirst())
+        } ?: error("Test storage did not start")
         NativeClient.trustIdentity(device, fingerprint)
     }
     private fun pauseAtFourMiB(control: TransferControl, done: Long) {

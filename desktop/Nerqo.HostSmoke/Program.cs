@@ -131,6 +131,14 @@ if ((await client.PostAsJsonAsync("/api/transfers/begin", new { name = "native.t
 var cancellable = await client.PostAsJsonAsync("/api/transfers/begin", new { name = "cancel.txt", size = 100 });
 cancellable.EnsureSuccessStatusCode();
 string cancelId = (await cancellable.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetString()!;
+var otherPair = await client.PostAsJsonAsync("/api/pair", new { pin = host.PairCode, name = "Other smoke device" });
+otherPair.EnsureSuccessStatusCode();
+string otherToken = (await otherPair.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("token").GetString()!;
+client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", otherToken);
+if ((await client.DeleteAsync($"/api/transfers/{cancelId}")).StatusCode != System.Net.HttpStatusCode.Forbidden
+    || (await client.PostAsJsonAsync("/api/transfers/begin", new { name = "native.txt", size = uploaded.Length, resumeId = id })).StatusCode != System.Net.HttpStatusCode.Forbidden)
+    throw new Exception("Another paired device could cancel or replay the upload session");
+client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
 (await client.DeleteAsync($"/api/transfers/{cancelId}")).EnsureSuccessStatusCode();
 if (File.Exists(Path.Combine(host.StorageDirectory, cancelId + ".part"))) throw new Exception("Cancelled partial still exists");
 if ((await client.PostAsJsonAsync("/api/transfers/begin", new { name = "cancel.txt", size = 100, resumeId = cancelId })).StatusCode != System.Net.HttpStatusCode.Conflict)
@@ -325,6 +333,6 @@ try
 finally { if (Directory.Exists(directSource)) Directory.Delete(directSource, true); }
 
 var devices = host.PairedDevices;
-if (devices.Count == 0 || !host.RevokePeer(devices[0].TokenHash)) throw new Exception("Cannot revoke paired device");
+if (devices.Count == 0 || !host.RevokePeer(devices.Single(p => p.Name == "Smoke").TokenHash)) throw new Exception("Cannot revoke paired device");
 if ((await client.GetAsync("/api/items")).StatusCode != System.Net.HttpStatusCode.Unauthorized) throw new Exception("Revoked token still works");
 Console.WriteLine("Nerqo native encrypted LAN smoke: TLS, pairing, files, SHA256, receipts, range resume, cancellation, peer revocation PASSED");
