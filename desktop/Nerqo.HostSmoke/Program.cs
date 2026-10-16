@@ -236,6 +236,26 @@ var wrongFolder = await client.PostAsJsonAsync("/api/transfers/begin",
           relativePath = "pending.txt", resumeId = pendingId });
 if (wrongFolder.IsSuccessStatusCode) throw new Exception("Cross-folder transfer identity reuse accepted");
 
+// A successful set of checksummed chunks is still not trusted until the
+// sender's complete-file digest matches. Simulate a source change on resume.
+var tampered = Encoding.UTF8.GetBytes("modified source after interruption");
+var wrongBegin = await client.PostAsJsonAsync("/api/transfers/begin",
+    new { name = "tampered.txt", size = tampered.Length });
+wrongBegin.EnsureSuccessStatusCode();
+string badId = (await wrongBegin.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetString()!;
+using (var validChunk = new ByteArrayContent(tampered))
+{
+    validChunk.Headers.Add("X-Offset", "0");
+    validChunk.Headers.Add("X-SHA256", Convert.ToHexString(SHA256.HashData(tampered)).ToLowerInvariant());
+    (await client.PutAsync($"/api/transfers/{badId}/chunk", validChunk)).EnsureSuccessStatusCode();
+}
+var refusedFinish = await client.PostAsJsonAsync(
+    $"/api/transfers/{badId}/finish?sha256={new string('0', 64)}", new {});
+if (refusedFinish.StatusCode != System.Net.HttpStatusCode.UnprocessableEntity)
+    throw new Exception("Whole-file SHA-256 mismatch was accepted");
+if ((await client.GetAsync($"/api/files/{badId}")).StatusCode != System.Net.HttpStatusCode.NotFound)
+    throw new Exception("Corrupt transferred file was published");
+
 var devices = host.PairedDevices;
 if (devices.Count == 0 || !host.RevokePeer(devices[0].TokenHash)) throw new Exception("Cannot revoke paired device");
 if ((await client.GetAsync("/api/items")).StatusCode != System.Net.HttpStatusCode.Unauthorized) throw new Exception("Revoked token still works");

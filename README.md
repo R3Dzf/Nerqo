@@ -29,7 +29,7 @@ The old `app.py` / `web/` implementation is retained for migration tests only. I
 
 ## File and folder transfers
 
-- File uploads: 4 MiB chunks, per-chunk SHA-256 and full-file verification, and resumable uploads after a disconnection.
+- File uploads: 4 MiB chunks, per-chunk SHA-256 and mandatory sender-verified full-file SHA-256 before publication, and resumable uploads after a disconnection.
 - Windows → Android: share one or more files, or select a folder. Folder structures (including empty folders) are preserved in a downloadable ZIP.
 - Android → Windows: send files with the document picker or Android's Share menu; use **Send folder directly** to transfer an SAF-selected folder file by file, without temporary ZIP staging.
 - Both folder actions show archive preparation progress. Archives are files, **not automatically extracted** on the destination.
