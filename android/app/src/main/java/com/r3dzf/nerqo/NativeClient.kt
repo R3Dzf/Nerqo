@@ -303,6 +303,8 @@ internal object NativeClient {
                 wholeFileDigest.update(buffer, 0, used)
                 progress(offset, size)
             }
+            TransferControl.check()
+            if (input.read() != -1) throw IOException("Source file grew during transfer. Start a new transfer.")
         } ?: throw IOException("Cannot open selected file")
         val expectedFileHash = shaDigest(wholeFileDigest)
         postJson(device.endpoint, "/api/transfers/$id/finish?sha256=" + expectedFileHash,

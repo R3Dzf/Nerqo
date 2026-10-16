@@ -226,7 +226,11 @@ class MainActivity : ComponentActivity() {
         val job = TransferJob(kind = kind, title = title, host = d.address, port = d.port,
             deviceName = d.name, fingerprint = fingerprint, uris = uris.map { it.toString() },
             target = target?.toString() ?: "", entry = entry)
-        try { job.save(this); pendingTransfer = job; resumeTransfer() }
+        try {
+            job.save(this); pendingTransfer = job
+            transferUi = TransferUi(job.title, paused = true, detail = "Ready to start")
+            resumeTransfer()
+        }
         catch (error: Exception) { message = error.message ?: "Could not save transfer" }
     }
     private fun submitFiles(uris: List<Uri>) {
@@ -277,9 +281,12 @@ class MainActivity : ComponentActivity() {
                 var sampleTime = System.nanoTime()
                 var sampleBytes = 0L
                 var bytesPerSecond = 0.0
+                var sampleLabel: String? = null
                 fun update(done: Long, total: Long, label: String = "") {
                     val now = System.nanoTime()
-                    if (done < sampleBytes) { sampleTime = now; sampleBytes = done; bytesPerSecond = 0.0 }
+                    if (sampleLabel != label || done < sampleBytes) {
+                        sampleLabel = label; sampleTime = now; sampleBytes = done; bytesPerSecond = 0.0
+                    }
                     if (now - sampleTime >= 500_000_000L) {
                         bytesPerSecond = (done - sampleBytes).coerceAtLeast(0) * 1_000_000_000.0 / (now - sampleTime)
                         sampleTime = now; sampleBytes = done
@@ -293,7 +300,13 @@ class MainActivity : ComponentActivity() {
                         else -> "%.2f GB".format(java.util.Locale.ROOT, value / 1073741824.0)
                     }
                     val rate = if (bytesPerSecond > 0) " · " + bytes(bytesPerSecond.toLong()) + "/s" else ""
-                    val eta = if (bytesPerSecond > 0 && total > done) " · ~" + ((total - done) / bytesPerSecond).toLong() + "s left" else ""
+                    val seconds = if (bytesPerSecond > 0 && total > done) ((total - done) / bytesPerSecond).toLong() else -1L
+                    val eta = when {
+                        seconds < 0 -> ""
+                        seconds < 60 -> " · ~" + seconds + "s left"
+                        seconds < 3600 -> " · ~" + (seconds / 60) + "m left"
+                        else -> " · ~" + (seconds / 3600) + "h " + ((seconds % 3600) / 60) + "m left"
+                    }
                     val detail = (if (label.isEmpty()) "" else label + "\n") + bytes(done) + (if (total > 0) " / " + bytes(total) else "") + rate + eta
                     runOnUiThread { if (!isDestroyed && pendingTransfer?.id == job.id) {
                         progress = fraction; transferUi = TransferUi(job.title, detail = detail, fraction = fraction)
@@ -323,7 +336,7 @@ class MainActivity : ComponentActivity() {
                     }
                 }
                 TransferJob.clear(this)
-                NativeClient.cleanSession(this, destination, access, job.id, cancel = false)
+                runCatching { NativeClient.cleanSession(this, destination, access, job.id, cancel = false) }
                 runOnUiThread { if (!isDestroyed) { pendingTransfer = null; transferUi = null; message = "Transfer completed and SHA-256 verified" } }
             } catch (error: Exception) {
                 if (cancelOnly || control.stop == TransferStop.CANCEL || error is TransferCancelled) {
@@ -332,7 +345,7 @@ class MainActivity : ComponentActivity() {
                     runOnUiThread { if (!isDestroyed) { pendingTransfer = null; transferUi = null; message = "Transfer cancelled. Completed files were kept." } }
                 } else {
                     runOnUiThread { if (!isDestroyed) {
-                        transferUi = TransferUi(job.title, paused = true, detail = if (control.stop == TransferStop.PAUSE || error is TransferPaused) "Paused · Resume from the saved checkpoint" else "Interrupted · " + (error.message ?: "Try again"))
+                        transferUi = (transferUi ?: TransferUi(job.title)).copy(paused = true, detail = if (control.stop == TransferStop.PAUSE || error is TransferPaused) "Paused · Resume from the saved checkpoint" else "Interrupted · " + (error.message ?: "Try again"))
                         message = "Transfer saved. You can resume it or cancel."
                     } }
                 }
