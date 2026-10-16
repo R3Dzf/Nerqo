@@ -36,7 +36,7 @@ public static class FirewallAccess
     public static (bool Covered, bool Blocked) Evaluate(IEnumerable<FirewallRuleView> rules, string executable)
     {
         var matching = rules.Where(r => r.Enabled && r.Direction == 1 && (r.Profiles & PrivateProfile) != 0
-            && (SameProgram(r.Program, executable) || (r.Action == 0 && string.IsNullOrEmpty(r.Program)))).ToArray();
+            && SameProgram(r.Program, executable)).ToArray();
         bool Relevant(FirewallRuleView r, int protocol, int port) =>
             r.Protocol == 256 || (r.Protocol == protocol && IncludesPort(r.Ports, port));
         bool blocked = matching.Any(r => IsApplicableBlock(r, executable));
@@ -50,15 +50,10 @@ public static class FirewallAccess
     {
         if (!rule.Enabled || rule.Direction != 1 || rule.Action != 0 || (rule.Profiles & PrivateProfile) == 0)
             return false;
-        if (!string.IsNullOrEmpty(rule.Program) && !SameProgram(rule.Program, executable)) return false;
-        // A service-scoped rule does not apply to this normal desktop process.
-        // Address/interface-scoped general rules cannot prove this app is blocked.
-        if (!string.IsNullOrEmpty(rule.Service)) return false;
-        bool namedApp = SameProgram(rule.Program, executable);
-        if (!namedApp && (rule.LocalAddresses != "*" || rule.RemotePorts != "*"
-            || !(string.IsNullOrEmpty(rule.Interfaces) || rule.Interfaces.Equals("All", StringComparison.OrdinalIgnoreCase))
-            || !rule.RemoteAddresses.Split(',').Any(s => s.Trim() == "*" || s.Trim().Equals("LocalSubnet", StringComparison.OrdinalIgnoreCase))))
-            return false;
+        // Programless rules can target services, AppContainers and other contexts.
+        // Port overlap alone cannot attribute those rules to this desktop process.
+        // Aggregate inbound-block policy is checked independently by Inspect().
+        if (!SameProgram(rule.Program, executable) || !string.IsNullOrEmpty(rule.Service)) return false;
         return rule.Protocol == 256 || (rule.Protocol == Tcp && IncludesPort(rule.Ports, 44888))
             || (rule.Protocol == Udp && IncludesPort(rule.Ports, 44889));
     }
@@ -74,8 +69,7 @@ public static class FirewallAccess
                 try
                 {
                     // Ignore unrelated rules before accessing their optional protocol fields.
-                    if (!SameProgram((string?)rule.ApplicationName ?? "", Executable)
-                        && !((int)rule.Action == 0 && string.IsNullOrEmpty((string?)rule.ApplicationName))) continue;
+                    if (!SameProgram((string?)rule.ApplicationName ?? "", Executable)) continue;
                     int protocol = rule.Protocol;
                     result.Add(new((string?)rule.ApplicationName ?? "", (bool)rule.Enabled, (int)rule.Direction,
                         (int)rule.Action, protocol, protocol is Tcp or Udp ? (string)rule.LocalPorts : "*", (int)rule.Profiles,

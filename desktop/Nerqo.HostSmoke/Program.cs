@@ -18,8 +18,8 @@ static void TestFirewallDecisions()
         if (FirewallAccess.Evaluate(new[] { invalid, udp }, app).Covered) throw new Exception("Invalid private rule accepted");
     if (!FirewallAccess.Evaluate(new[] { tcp, udp, tcp with { Action = 0 } }, app).Blocked)
         throw new Exception("Explicit application block ignored");
-    if (!FirewallAccess.Evaluate(new[] { tcp, udp, tcp with { Program = "", Action = 0, Protocol = 256 } }, app).Blocked)
-        throw new Exception("Global inbound block ignored");
+    if (FirewallAccess.Evaluate(new[] { tcp, udp, tcp with { Program = "", Action = 0, Protocol = 256 } }, app).Blocked)
+        throw new Exception("An unattributed programless rule falsely blocked the desktop app");
     var generalBlock = tcp with { Program = "", Action = 0, Protocol = 256 };
     foreach (var scoped in new[] { generalBlock with { Service = "OtherWindowsService" },
         generalBlock with { LocalAddresses = "127.0.0.1" }, generalBlock with { RemoteAddresses = "203.0.113.1" },
