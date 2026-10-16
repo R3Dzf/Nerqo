@@ -224,9 +224,13 @@ if (!repeatedInfo.GetProperty("complete").GetBoolean()
 var otherStart = await client.PostAsJsonAsync("/api/folders/begin", new { name = "AnotherFolder" });
 otherStart.EnsureSuccessStatusCode();
 string otherId = (await otherStart.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetString()!;
+var pendingFolder = await client.PostAsJsonAsync("/api/transfers/begin",
+    new { name = "pending.txt", size = folderPayload.Length, folderId, relativePath = "nested/pending.txt" });
+pendingFolder.EnsureSuccessStatusCode();
+string pendingId = (await pendingFolder.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetString()!;
 var wrongFolder = await client.PostAsJsonAsync("/api/transfers/begin",
-    new { name = "photo.txt", size = folderPayload.Length, folderId = otherId,
-          relativePath = "photo.txt", resumeId = folderFileId });
+    new { name = "pending.txt", size = folderPayload.Length, folderId = otherId,
+          relativePath = "pending.txt", resumeId = pendingId });
 if (wrongFolder.IsSuccessStatusCode) throw new Exception("Cross-folder transfer identity reuse accepted");
 
 var devices = host.PairedDevices;
