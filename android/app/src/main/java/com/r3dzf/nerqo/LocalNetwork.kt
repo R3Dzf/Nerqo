@@ -9,7 +9,6 @@ import android.os.Looper
 import androidx.compose.runtime.*
 import java.net.Inet4Address
 import java.net.InetAddress
-import java.security.SecureRandom
 
 /** Application-owned Wi-Fi requests survive Activity recreation and screen closure. */
 internal object LocalNetwork {
@@ -75,10 +74,10 @@ internal object LocalNetwork {
         }
         if (fiveGHz) {
             check(Build.VERSION.SDK_INT >= 36 && wifi.is5GHzBandSupported) { "In-app 5 GHz hotspot needs Android 16 and compatible hardware. Select 5 GHz in system hotspot settings on older phones." }
-            val bytes = ByteArray(16).also { SecureRandom().nextBytes(it) }
-            val pass = bytes.joinToString("") { "%02x".format(it.toInt() and 255) }
-            val config = SoftApConfiguration.Builder().setSsid("Nerqo-${pass.take(6)}")
-                .setPassphrase(pass, SoftApConfiguration.SECURITY_TYPE_WPA2_PSK).setBand(SoftApConfiguration.BAND_5GHZ).build()
+            // Public Android 16 API permits channel/band selection. Leave credentials
+            // unset so Android generates a secured local-only hotspot configuration.
+            val channels = android.util.SparseIntArray().apply { put(SoftApConfiguration.BAND_5GHZ, 0) }
+            val config = SoftApConfiguration.Builder().setChannels(channels).build()
             wifi.startLocalOnlyHotspotWithConfiguration(config, app.mainExecutor, callback)
         } else wifi.startLocalOnlyHotspot(callback, main)
     }

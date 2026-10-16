@@ -155,6 +155,7 @@ class MainActivity : ComponentActivity() {
     }
     private fun select(found: Device) {
         if (TransferRuntime.running) { message = "Pause the transfer before reconnecting"; return }
+        sessionGeneration++
         device = found
         connected = false
         token = null
@@ -223,7 +224,7 @@ class MainActivity : ComponentActivity() {
             try {
                 bindLocalNetwork()
                 val fresh = NativeClient.list(d, access)
-                ReceiptOutbox.flush(this)
+                ReceiptOutbox.schedule(this)
                 runOnUiThread {
                     if (generation == sessionGeneration && !isDestroyed) {
                         connected = true
@@ -232,8 +233,7 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             } catch (_: ConnectionPausedException) {
-                prefs.edit().putBoolean("disconnected", true).apply()
-                runOnUiThread { if (generation == sessionGeneration && !isDestroyed) { token = null; connected = false; entries = emptyList(); message = "Disconnected. Choose Reconnect to continue." } }
+                runOnUiThread { if (generation == sessionGeneration && !isDestroyed) { connected = false; entries = emptyList(); message = "Disconnected. Choose Reconnect to continue." } }
             } catch (_: PairingExpiredException) {
                 prefs.edit().remove("token_${d.address}").apply()
                 runOnUiThread { if (generation == sessionGeneration && !isDestroyed) {
@@ -254,12 +254,13 @@ class MainActivity : ComponentActivity() {
         val d = device ?: return
         val access = token ?: return
         sessionGeneration++
+        TransferRuntime.message = ""
         transferControl?.interrupt(TransferStop.PAUSE, closeAsync = true)
         connected = false; token = null; entries = emptyList(); showPair = false
         prefs.edit().putBoolean("disconnected", true).apply()
         message = "Disconnected. Any unfinished transfer is saved. Wi-Fi stays connected."
         executor.execute {
-            // Best effort server revocation; local disconnect always succeeds, even offline.
+            // Best effort server suspension; local disconnect always succeeds, even offline.
             runCatching { bindLocalNetwork(); NativeClient.disconnect(d, access) }
         }
     }
@@ -268,6 +269,7 @@ class MainActivity : ComponentActivity() {
         select(current)
     }
     private fun forget() {
+        TransferRuntime.message = ""
         val current = device ?: return
         AlertDialog.Builder(this).setTitle("Forget this computer?")
             .setMessage("Saved access will be removed. Pair again with the Windows QR. Cancel unfinished transfers first.")
@@ -370,6 +372,7 @@ class MainActivity : ComponentActivity() {
     }
     private fun resumeTransfer(cancelOnly: Boolean = false) {
         if (pendingTransfer == null || busy || TransferControl.workerActive.get()) return
+        TransferRuntime.message = ""
         try {
             if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
                 && !prefs.getBoolean("notification_asked", false)) {
@@ -549,7 +552,7 @@ class MainActivity : ComponentActivity() {
         NerqoTheme(darkMode) {
             NerqoScreen(
                 onHistoryOpen = ::openHistory, onHistoryRetry = ::retryHistory, onHistoryClear = ::clearHistory,
-                deviceName = device?.name, connected = connected, paired = token != null, history = history,
+                deviceName = device?.name, connected = connected, paired = connected && token != null, history = history,
                 nearby = nearby, entries = entries, busy = busy, progress = progress,
                 message = if (TransferRuntime.message.isNotBlank()) TransferRuntime.message else message, network = wifiText(), hotspotText = hotspotText,
                 transfer = transferUi, onPause = ::pauseTransfer,

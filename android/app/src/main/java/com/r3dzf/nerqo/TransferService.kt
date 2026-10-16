@@ -46,6 +46,7 @@ class TransferService : Service() {
     private var progress = 0f
     private var wake: PowerManager.WakeLock? = null
     private var wifiLock: WifiManager.WifiLock? = null
+    private var destroyed = false
     private var lastNotification = 0L
     private fun onMain(action: () -> Unit) { handler.post(action) }
     override fun onBind(intent: Intent?) = null
@@ -68,6 +69,7 @@ class TransferService : Service() {
             .addAction(Notification.Action.Builder(null, "Cancel", action("cancel")).build()).build()
     }
     private fun showNotification(detail: String, fraction: Float) {
+        if (destroyed || !TransferRuntime.running) return
         val now = SystemClock.elapsedRealtime()
         if (now - lastNotification < 1000) return
         lastNotification = now
@@ -75,7 +77,7 @@ class TransferService : Service() {
     }
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
-            "pause" -> { transferControl?.interrupt(TransferStop.PAUSE, closeAsync = true); return START_NOT_STICKY }
+            "pause" -> { transferControl?.interrupt(TransferStop.PAUSE, closeAsync = true); if (transferControl == null) stopSelf(); return START_NOT_STICKY }
             "cancel" -> if (TransferRuntime.running) { transferControl?.interrupt(TransferStop.CANCEL, closeAsync = true); return START_NOT_STICKY }
         }
         if (TransferRuntime.running) return START_NOT_STICKY
@@ -105,6 +107,7 @@ class TransferService : Service() {
         stopForeground(STOP_FOREGROUND_REMOVE); stopSelf()
     }
     override fun onDestroy() {
+        destroyed = true
         transferControl?.interrupt(TransferStop.PAUSE, closeAsync = true)
         releaseLocks(); executor.shutdown(); super.onDestroy()
     }
@@ -199,26 +202,26 @@ class TransferService : Service() {
                 TransferJob.clear(this)
                 rememberTransfer(job, "Completed")
                 runCatching { NativeClient.cleanSession(this, destination, access, job.id, cancel = false) }
-                onMain { if (true) { pendingTransfer = null; transferUi = null; message = "Transfer completed and SHA-256 verified" } }
+                onMain { pendingTransfer = null; transferUi = null; message = "Transfer completed and SHA-256 verified" }
             } catch (error: Exception) {
                 if (cancelOnly || control.stop == TransferStop.CANCEL || error is TransferCancelled) {
                     runCatching { NativeClient.cleanSession(this, destination, access, job.id, cancel = true) }
                     TransferJob.clear(this)
                     rememberTransfer(job, "Cancelled")
-                    onMain { if (true) { pendingTransfer = null; transferUi = null; message = "Transfer cancelled. Completed files were kept." } }
+                    onMain { pendingTransfer = null; transferUi = null; message = "Transfer cancelled. Completed files were kept." }
                 } else {
                     val paused = control.stop == TransferStop.PAUSE || error is TransferPaused
                     rememberTransfer(job, if (paused) "Paused" else "Interrupted", if (paused) "" else error.message ?: "Transfer interrupted")
-                    onMain { if (true) {
+                    onMain {
                         transferUi = (transferUi ?: TransferUi(job.title)).copy(paused = true, detail = if (control.stop == TransferStop.PAUSE || error is TransferPaused) "Paused · Resume from the saved checkpoint" else "Interrupted · " + (error.message ?: "Try again"))
                         message = "Transfer saved. You can resume it or cancel."
-                    } }
+                    }
                 }
             } finally {
-                runCatching { ReceiptOutbox.flush(this) }
+                ReceiptOutbox.schedule(this)
                 releaseLocks()
                 TransferControl.workerActive.set(false)
-                onMain { if (true) { TransferRuntime.running = false; transferControl = null; progress = 0f; stopForeground(STOP_FOREGROUND_REMOVE); stopSelf() } }
+                onMain { TransferRuntime.running = false; transferControl = null; progress = 0f; stopForeground(STOP_FOREGROUND_REMOVE); stopSelf() }
             }
         }
     }

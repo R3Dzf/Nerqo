@@ -189,7 +189,7 @@ public partial class MainWindow : Window
     private void ForgetSelectedPeer(object s, RoutedEventArgs e) {
         if (PeerList.SelectedItem is PairedDevice peer && MessageBox.Show($"Remove saved access for {peer.Name}? Pair again using QR to reconnect.", "Forget device", MessageBoxButton.YesNo) == MessageBoxResult.Yes) service.RevokePeer(peer.TokenHash);
     }
-    private void ControlTransfer(object s, RoutedEventArgs e) { if (s is Button { DataContext: LiveTransfer transfer, Tag: string action }) service.ControlTransfer(transfer.Id, action); }
+    private void ControlTransfer(object s, RoutedEventArgs e) { if (s is System.Windows.Controls.Button { DataContext: LiveTransfer transfer, Tag: string action }) service.ControlTransfer(transfer.Id, action); }
     private void ClearHistory(object s, RoutedEventArgs e) {
         if (MessageBox.Show("Clear the transfer log? Your files will be kept.", "Clear History", MessageBoxButton.YesNo) != MessageBoxResult.Yes) return;
         try { service.ClearHistory(); RefreshItems(); } catch (Exception ex) { FooterLabel.Text = ex.Message; }
