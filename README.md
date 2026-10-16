@@ -4,7 +4,7 @@
 
 Nerqo is a native Windows and Android application for transferring files, folders, links and text over a local network. A router does not need internet access; the devices can also use an Android hotspot.
 
-> **Development branch:** `dev/native-5ghz-20261016`. The native rebuild is not yet a stable release. The `main` branch and the older v0.3.0 release are unchanged.
+> **Development branch:** `dev/native-5ghz-20261016`. Version 1.0.0 has passed the native Windows/Android CI and has been built as a Windows installer plus a privately signed Android APK. These files have not yet been published as an official GitHub Release, and real-device acceptance tests remain outstanding. The `main` branch and older v0.3.0 release are unchanged.
 
 ## Native applications
 
@@ -51,6 +51,6 @@ Android release signing uses a permanent, pinned public certificate fingerprint.
 - [Native implementation roadmap](docs/NATIVE_ROADMAP.md)
 - [Offline Android release signing](docs/OFFLINE_RELEASE_SIGNING.md)
 
-The native CI compiles WPF and Android, runs transport tests and produces preview artifacts. The native Stable workflow is manual and gated: only a checked Windows Installer and a release-signed Android APK with matching, independently rebuilt payloads can be published from `main`. It does **not** publish the old Python/browser app.
+The native CI compiles WPF and Android, runs encrypted transport and integrity smoke tests, and produces build artifacts (some CI artifact names retain the historical Preview suffix). The native Stable workflow is gated on `main`: it accepts only a native Windows installer and an Android APK signed with the permanent key, whose payload must match the independently built unsigned package. It does **not** publish the old Python/browser app.
 
-**Still pending for v1.0 Stable:** tested Wi-Fi Direct/Bluetooth fallbacks (where supported), broader network diagnostics, real-device testing on Windows and Android, and verified in-place upgrades. Preview build success does not equal production readiness.
+**Release-validation limits:** Wi-Fi Direct/Bluetooth fallbacks (where supported), real Wi-Fi/hotspot/5 GHz transfer benchmarking, testing on physical Windows/Android devices, and verified in-place upgrade tests have not been completed. Passing CI validates the build and emulated transport, not every router or phone. The Windows installer has no Authenticode publisher certificate.
