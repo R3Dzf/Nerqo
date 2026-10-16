@@ -9,6 +9,9 @@ on:
       - 'desktop/**'
       - 'android/**'
       - '.github/workflows/native-preview.yml'
+concurrency:
+  group: nerqo-native-${{ github.ref }}
+  cancel-in-progress: true
 permissions:
   contents: read
 jobs:
