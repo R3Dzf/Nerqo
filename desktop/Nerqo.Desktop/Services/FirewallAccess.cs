@@ -88,7 +88,7 @@ public static class FirewallAccess
             if (!state.Covered) return new("missing", "Allow Nerqo to receive files and discover devices on your private Wi-Fi or hotspot.", true);
             if (((int)policy.CurrentProfileTypes & PrivateProfile) == 0 && ((int)policy.CurrentProfileTypes & 4) != 0)
                 return new("public", "Private-network rules are ready. This connection is Public: mark your trusted Wi-Fi as Private in Windows network settings.");
-            return new("ready", "Nerqo is allowed on private networks. Transfers and discovery are limited to your local subnet.");
+            return new("ready", "Private-network rules for Nerqo transfers and discovery are ready. Existing Windows rules are unchanged.");
         }
         catch (Exception ex) when (ex is COMException or InvalidOperationException or System.Reflection.TargetInvocationException)
         { return new("unknown", "Could not read Windows Firewall permissions. Review Windows Firewall settings."); }
@@ -153,7 +153,7 @@ public static class FirewallAccess
             foreach (int protocol in new[] { Tcp, Udp })
             {
                 try { object existing = rules.Item(RuleName(protocol)); Release(existing); throw new InvalidOperationException("Smoke rules already exist; refusing to modify them"); }
-                catch (COMException) { }
+                catch (Exception ex) when (ex.HResult == unchecked((int)0x80070002)) { }
             }
             try
             {
@@ -174,7 +174,12 @@ public static class FirewallAccess
                 Directory.CreateDirectory("dist/qa");
                 File.WriteAllText("dist/qa/windows-firewall.txt", "PASS: native Firewall COM read/write; executable-specific TCP 44888 and UDP 44889; Private profile and LocalSubnet only; edge traversal disabled; test rules removed.\n");
             }
-            finally { foreach (int protocol in new[] { Tcp, Udp }) rules.Remove(RuleName(protocol)); }
+            finally
+            {
+                foreach (int protocol in new[] { Tcp, Udp })
+                    try { rules.Remove(RuleName(protocol)); }
+                    catch (Exception ex) when (ex.HResult == unchecked((int)0x80070002)) { }
+            }
         }
         finally { Release(rules); Release(instance); }
     }
