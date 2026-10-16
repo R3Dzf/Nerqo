@@ -1,17 +1,11 @@
-Nerqo native 1.0.1 — development build
+Nerqo native 1.0.4 Stable channel
 
-This iteration adds matching Windows/Android Transfers, Devices and Settings,
-a unified vector icon, persistent light/dark appearance, Windows file/folder
-drag-and-drop, visible operation feedback, and verified completed-file retry
-for Windows-to-Android folders.
+Native Windows WPF and Android Compose apps. 1.0.4 adds consent-based Windows
+Firewall setup for private local sharing and an accessible, theme-aware appearance
+switch. Permanent Android signing, native installer updates and compatible delta
+updates continue. Release publication requires all automated gates to pass.
 
-The native clients use WPF and Compose. The legacy browser implementation is
-retained only for regression tests and is not shipped in the native installer.
-
-Not yet an official Stable release. Windows/Android compilation, the encrypted host smoke, Android integrity tests,
-Windows installer upgrade smoke and Android 35 UI navigation have passed. The
-Android APK is privately signed with the original permanent identity and its
-payload matches the CI unsigned build. Physical-device transfer and upgrade
-checks remain outstanding. A Debug APK cannot update the permanent-key installation.
-Wi-Fi Direct and Bluetooth are not implemented. Windows Authenticode signing
-is not present. See docs/NATIVE_ROADMAP.md for all nine phases.
+LAN/Wi-Fi and normal hotspot transfers are implemented. Native Wi-Fi Direct and
+Bluetooth are not implemented. Physical-device acceptance and Windows trusted
+Authenticode publisher signing remain outstanding. See docs/NATIVE_ROADMAP.md
+and docs/releases/v1.0.4.md for the supported scope and validation limits.

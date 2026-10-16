@@ -42,15 +42,24 @@ jobs:
           $app = Start-Process -FilePath "$pwd/dist/Windows/Nerqo.exe" -ArgumentList '--ui-smoke' -PassThru
           if (-not $app.WaitForExit(60000)) { $app.Kill(); throw 'UI smoke timed out' }
           if ($app.ExitCode -ne 0) { throw "UI smoke exit: $($app.ExitCode)" }
-          foreach ($screen in @('Transfers', 'Devices', 'Settings', 'Transfers-dark')) {
+          foreach ($screen in @('Transfers', 'Devices', 'Settings', 'Transfers-dark', 'Settings-dark')) {
             if (-not (Test-Path "ui-smoke/$screen.png")) { throw "Missing UI screenshot: $screen" }
           }
       - uses: actions/upload-artifact@v4
         with:
           name: Nerqo-Windows-UI
-          path: ui-smoke/*.png
+          path: ui-smoke/**
       - name: Execute native LAN transport smoke test
         run: dotnet run --project desktop/Nerqo.HostSmoke/Nerqo.HostSmoke.csproj -c Release
+      - name: Verify private-only native Firewall permissions
+        shell: pwsh
+        run: |
+          $test = Start-Process -FilePath "$pwd/dist/Windows/Nerqo.exe" -ArgumentList '--firewall-smoke' -Wait -PassThru
+          if ($test.ExitCode -ne 0) {
+            if (Test-Path dist/qa/windows-firewall-error.txt) { Get-Content dist/qa/windows-firewall-error.txt }
+            throw 'Native Firewall permission verification failed'
+          }
+          Get-Content dist/qa/windows-firewall.txt
       - name: Build normal Windows installer
         shell: pwsh
         run: |

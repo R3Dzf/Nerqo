@@ -23,12 +23,18 @@ public partial class MainWindow : Window
     private System.Windows.Forms.NotifyIcon? tray;
     private bool exiting;
     private bool preparing;
+    private bool loadingTheme = true;
+    private FirewallStatus? firewallStatus;
+    private readonly string firewallPromptFile = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Nerqo", "firewall-prompt-v1.txt");
     private readonly string themeFile = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Nerqo", "appearance.txt");
     public MainWindow()
     {
         InitializeComponent();
         TransferNav.IsChecked = true;
-        DarkModeToggle.IsChecked = File.Exists(themeFile) && File.ReadAllText(themeFile) == "dark";
+        try { DarkModeToggle.IsChecked = File.Exists(themeFile) && File.ReadAllText(themeFile) == "dark"; }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { DarkModeToggle.IsChecked = false; }
+        ApplyTheme(false);
+        loadingTheme = false;
         PairCodeLabel.Text = service.PairCode;
         IdentityLabel.Text = service.PairingIdentity;
         service.Changed += () => Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(RefreshItems));
@@ -46,7 +52,9 @@ public partial class MainWindow : Window
             StatusLabel.Text = "●  Ready on local network";
             await UpdateNetworkAndQrAsync();
             SetupTray(); RefreshItems();
-            if (Environment.GetCommandLineArgs().Contains("--ui-smoke")) await CaptureUiSmokeAsync();
+            bool smoke = Environment.GetCommandLineArgs().Contains("--ui-smoke");
+            await RefreshFirewallAsync(!smoke);
+            if (smoke) await CaptureUiSmokeAsync();
         }
         catch (Exception ex)
         {
@@ -203,10 +211,15 @@ public partial class MainWindow : Window
         DevicesPage.Visibility = page == "Devices" ? Visibility.Visible : Visibility.Collapsed;
         SettingsPage.Visibility = page == "Settings" ? Visibility.Visible : Visibility.Collapsed;
         PageTitle.Text = page;
+        UpdateFirewallCardVisibility();
         PageSubtitle.Text = page switch { "Devices" => "A secure connection starts here.", "Settings" => "A few things to make Nerqo yours.", _ => "A little closer. A lot easier to share." };
     }
     private void GoToDevices(object sender, RoutedEventArgs e) => DevicesNav.IsChecked = true;
     private void ChangeTheme(object sender, RoutedEventArgs e)
+    {
+        if (DarkModeToggle != null) ApplyTheme(!loadingTheme);
+    }
+    private void ApplyTheme(bool persist)
     {
         bool dark = DarkModeToggle.IsChecked == true;
         string[] names = { "Background", "Panel", "Surface", "Foreground", "Muted", "Stroke", "Accent", "OnAccent" };
@@ -215,8 +228,59 @@ public partial class MainWindow : Window
             : new[] { "#F3F6F5", "#FFFFFF", "#EAF1EE", "#173638", "#5B7375", "#D7E4DE", "#176C5B", "#FFFFFF" };
         for (int i = 0; i < names.Length; i++)
             System.Windows.Application.Current.Resources[names[i]] = new SolidColorBrush((Color)ColorConverter.ConvertFromString(colors[i]));
+        if (!persist) return;
         try { Directory.CreateDirectory(Path.GetDirectoryName(themeFile)!); File.WriteAllText(themeFile, dark ? "dark" : "light"); }
-        catch (IOException) { FooterLabel.Text = "Appearance changed for this session"; }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { FooterLabel.Text = "Appearance changed for this session"; }
+    }
+    private void UpdateFirewallCardVisibility()
+    {
+        if (FirewallCard == null) return;
+        FirewallCard.Visibility = firewallStatus?.State == "ready" && TransfersPage.Visibility == Visibility.Visible
+            ? Visibility.Collapsed : Visibility.Visible;
+    }
+    private async Task RefreshFirewallAsync(bool firstUse = false)
+    {
+        CheckFirewallButton.IsEnabled = AllowFirewallButton.IsEnabled = false;
+        try
+        {
+            firewallStatus = await Task.Run(FirewallAccess.Inspect);
+            FirewallLabel.Text = firewallStatus.Message;
+            AllowFirewallButton.Visibility = firewallStatus.CanAllow ? Visibility.Visible : Visibility.Collapsed;
+            NetworkSettingsButton.Visibility = firewallStatus.State == "public" ? Visibility.Visible : Visibility.Collapsed;
+            UpdateFirewallCardVisibility();
+        }
+        catch (Exception) { FirewallLabel.Text = "Could not check Windows Firewall. Open Windows Firewall settings to review Nerqo."; }
+        finally { CheckFirewallButton.IsEnabled = AllowFirewallButton.IsEnabled = true; }
+        if (firstUse && firewallStatus?.CanAllow == true && !File.Exists(firewallPromptFile))
+        {
+            var answer = MessageBox.Show(this, "Allow Nerqo to receive files and find your phone on private Wi-Fi or a hotspot?\n\nWindows will ask for administrator permission. Only Nerqo's local sharing ports on private networks will be allowed. Public-network access and existing blocking rules are not changed.\n\nYou can also do this later with Allow private network access.", "Nerqo — allow local sharing", MessageBoxButton.YesNo, MessageBoxImage.Question);
+            try { Directory.CreateDirectory(Path.GetDirectoryName(firewallPromptFile)!); File.WriteAllText(firewallPromptFile, "shown"); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+            if (answer == MessageBoxResult.Yes) await AllowFirewallAsync();
+        }
+    }
+    private async void CheckFirewall(object sender, RoutedEventArgs e) => await RefreshFirewallAsync();
+    private async void AllowFirewall(object sender, RoutedEventArgs e) => await AllowFirewallAsync();
+    private async Task AllowFirewallAsync()
+    {
+        AllowFirewallButton.IsEnabled = CheckFirewallButton.IsEnabled = false;
+        try
+        {
+            FooterLabel.Text = "Approve the Windows permission request to allow private-network sharing";
+            bool applied = await Task.Run(FirewallAccess.RequestPrivateAccess);
+            FooterLabel.Text = applied ? "Private-network permission applied; checking Windows Firewall…" : "Permission was not applied. Review Windows Firewall settings or administrator policy.";
+        }
+        catch (System.ComponentModel.Win32Exception ex) when (ex.NativeErrorCode == 1223)
+        { FooterLabel.Text = "Windows permission was cancelled. You can allow access later."; }
+        catch (Exception) { FooterLabel.Text = "Could not request permission. Review Windows Firewall settings or administrator policy."; }
+        finally { await RefreshFirewallAsync(); }
+    }
+    private void OpenFirewallSettings(object sender, RoutedEventArgs e) => OpenSystemSettings("windowsdefender://network/");
+    private void OpenNetworkSettings(object sender, RoutedEventArgs e) => OpenSystemSettings("ms-settings:network-status");
+    private void OpenSystemSettings(string target)
+    {
+        try { Process.Start(new ProcessStartInfo(target) { UseShellExecute = true }); }
+        catch (Exception) { FooterLabel.Text = "Open Windows Settings → Privacy & security → Windows Security → Firewall & network protection."; }
     }
     private sealed record ActivityRow(TransferItem Item)
     {
@@ -250,7 +314,20 @@ public partial class MainWindow : Window
             var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(bitmap));
             using var file = File.Create(Path.Combine(output, nav.Tag + ".png")); encoder.Save(file);
         }
-        DarkModeToggle.IsChecked = true;
+        var peer = new System.Windows.Automation.Peers.ToggleButtonAutomationPeer(DarkModeToggle);
+        var toggle = (System.Windows.Automation.Provider.IToggleProvider)peer.GetPattern(System.Windows.Automation.Peers.PatternInterface.Toggle);
+        if (DarkModeToggle.IsChecked == true) toggle.Toggle();
+        toggle.Toggle();
+        if (DarkModeToggle.IsChecked != true || File.ReadAllText(themeFile) != "dark"
+            || ((SolidColorBrush)System.Windows.Application.Current.Resources["Background"]).Color != (Color)ColorConverter.ConvertFromString("#17272C"))
+            throw new InvalidOperationException("Dark appearance toggle did not apply and persist");
+        SettingsNav.IsChecked = true;
+        await Dispatcher.InvokeAsync(() => { }, DispatcherPriority.ApplicationIdle);
+        UpdateLayout();
+        var settingsBitmap = new RenderTargetBitmap((int)ActualWidth, (int)ActualHeight, 96, 96, PixelFormats.Pbgra32);
+        settingsBitmap.Render(this);
+        var settingsEncoder = new PngBitmapEncoder(); settingsEncoder.Frames.Add(BitmapFrame.Create(settingsBitmap));
+        using (var file = File.Create(Path.Combine(output, "Settings-dark.png"))) settingsEncoder.Save(file);
         TransferNav.IsChecked = true;
         await Dispatcher.InvokeAsync(() => { }, DispatcherPriority.ApplicationIdle);
         UpdateLayout();
@@ -258,6 +335,11 @@ public partial class MainWindow : Window
         darkBitmap.Render(this);
         var darkEncoder = new PngBitmapEncoder(); darkEncoder.Frames.Add(BitmapFrame.Create(darkBitmap));
         using (var file = File.Create(Path.Combine(output, "Transfers-dark.png"))) darkEncoder.Save(file);
+        toggle.Toggle();
+        if (DarkModeToggle.IsChecked != false || File.ReadAllText(themeFile) != "light"
+            || ((SolidColorBrush)System.Windows.Application.Current.Resources["Background"]).Color != (Color)ColorConverter.ConvertFromString("#F3F6F5"))
+            throw new InvalidOperationException("Light appearance toggle did not apply and persist");
+        File.WriteAllText(Path.Combine(output, "theme-verification.txt"), "PASS: accessible theme toggle; dark and light resources applied immediately; selection persisted.\n");
         await Quit();
     }
 

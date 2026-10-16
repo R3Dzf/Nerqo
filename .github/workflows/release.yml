@@ -54,11 +54,20 @@ jobs:
           $app = Start-Process -FilePath "$pwd/dist/Windows/Nerqo.exe" -ArgumentList '--ui-smoke' -PassThru
           if (-not $app.WaitForExit(60000)) { $app.Kill(); throw 'UI smoke timed out' }
           if ($app.ExitCode -ne 0) { throw "UI smoke exit: $($app.ExitCode)" }
-          foreach ($screen in @('Transfers', 'Devices', 'Settings', 'Transfers-dark')) {
+          foreach ($screen in @('Transfers', 'Devices', 'Settings', 'Transfers-dark', 'Settings-dark')) {
             if (-not (Test-Path "ui-smoke/$screen.png")) { throw "Missing UI screenshot: $screen" }
           }
       - name: Test encrypted LAN transport, resumable files and folder recovery
         run: dotnet run --project desktop/Nerqo.HostSmoke/Nerqo.HostSmoke.csproj -c Release
+      - name: Verify private-only native Firewall permissions
+        shell: pwsh
+        run: |
+          $test = Start-Process -FilePath "$pwd/dist/Windows/Nerqo.exe" -ArgumentList '--firewall-smoke' -Wait -PassThru
+          if ($test.ExitCode -ne 0) {
+            if (Test-Path dist/qa/windows-firewall-error.txt) { Get-Content dist/qa/windows-firewall-error.txt }
+            throw 'Native Firewall permission verification failed'
+          }
+          Get-Content dist/qa/windows-firewall.txt
       - name: Build Windows setup
         shell: pwsh
         run: |
@@ -187,5 +196,5 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          (cd staging/release && sha256sum Nerqo-Windows-Setup.exe Nerqo-Android.apk update-manifest.json > SHA256SUMS.txt)
+          (cd staging/release && sha256sum Nerqo-* update-manifest.json > SHA256SUMS.txt)
           gh release create "$RELEASE_TAG" staging/release/* --target "$GITHUB_SHA" --title "Nerqo $RELEASE_TAG Stable" --notes-file "docs/releases/${RELEASE_TAG}.md" --latest

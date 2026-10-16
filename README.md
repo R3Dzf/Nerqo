@@ -4,7 +4,7 @@
 
 Nerqo is a native Windows and Android application for transferring files, folders, links and text over a local network. A router does not need internet access; the devices can also use an Android hotspot.
 
-> **Stable 1.0.3:** Native Windows and Android apps, saved transfers, Pause/Resume/Cancel and verified recovery. [Download both apps](https://github.com/R3Dzf/Nerqo/releases/tag/v1.0.3) · [Release notes and known limits](docs/releases/v1.0.3.md).
+> **Stable 1.0.4:** Native Windows and Android apps, saved transfers, Pause/Resume/Cancel and verified recovery. [Download both apps](https://github.com/R3Dzf/Nerqo/releases/tag/v1.0.4) · [Release notes and known limits](docs/releases/v1.0.4.md).
 
 ## Native applications
 
@@ -44,6 +44,16 @@ Both apps organize sharing into **Transfers**, **Devices** and **Settings**, wit
 ## Wi-Fi / hotspot performance
 
 Prefer a **5 GHz** network when both devices and the access point support it. **6 GHz** can be faster under suitable conditions. Nerqo reports the actual available radio band where the OS exposes it; it cannot guarantee or forcibly change bands on every device. The network works on 2.4 GHz as a fallback. No mobile data or internet bandwidth is consumed by the local file transfer.
+
+## Windows network permission
+
+On first use, Nerqo checks Windows Firewall. If permission is missing, choose
+**Allow private network access**, then approve Windows' administrator prompt.
+The app adds rules only for Nerqo's local transfer/discovery ports on private
+networks and your local subnet. It does not disable the firewall or open public
+networks. If the connection is Public, use **Network settings** to mark only your
+trusted Wi-Fi/hotspot Private. Explicit blocks and managed policies must be reviewed
+in Windows Firewall settings. **Check again** refreshes the permission status.
 
 ## Security
 

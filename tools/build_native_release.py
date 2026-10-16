@@ -9,12 +9,13 @@ import argparse
 import json
 import re
 import shutil
+import tempfile
 from pathlib import Path
 from zipfile import ZipFile, BadZipFile
 
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from nerqo.delta import file_digest, make_delta
+from nerqo.delta import file_digest, make_delta, apply_delta
 
 
 def check_versions(root: Path, version: str) -> None:
@@ -71,6 +72,11 @@ def prepare(version: str, windows: Path, android: Path, output: Path,
             delta = output / f"Nerqo-{platform}-from-{previous}.nrqd"
             make_delta(older, target, delta)
             if delta.stat().st_size < target.stat().st_size * .9:
+                with tempfile.TemporaryDirectory(prefix="nerqo-release-delta-") as folder:
+                    rebuilt = Path(folder) / filename
+                    apply_delta(older, delta, rebuilt)
+                    if file_digest(rebuilt) != file_digest(target):
+                        raise ValueError(f"Published delta does not reconstruct {filename}")
                 deltas.append({**describe(delta), "from_version": previous,
                                "base_sha256": file_digest(older).hex()})
             else:

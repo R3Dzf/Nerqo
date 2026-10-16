@@ -4,6 +4,27 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 
+// Read-side firewall decisions must reject partial, public-only and blocking rules.
+static void TestFirewallDecisions()
+{
+    const string app = @"C:\Nerqo\Nerqo.exe";
+    var tcp = new FirewallRuleView(app, true, 1, 1, 6, "44888", 2, "LocalSubnet");
+    var udp = tcp with { Protocol = 17, Ports = "44889" };
+    var allow = new[] { tcp, udp };
+    if (!FirewallAccess.Evaluate(allow, app).Covered) throw new Exception("Valid private rules rejected");
+    foreach (var invalid in new[] { tcp with { Enabled = false }, tcp with { Profiles = 4 }, tcp with { Ports = "44889" },
+        tcp with { Program = @"C:\Other\Nerqo.exe" }, tcp with { Direction = 2 }, tcp with { RemoteAddresses = "192.168.1.2" },
+        tcp with { Service = "OtherService" }, tcp with { RemotePorts = "123" } })
+        if (FirewallAccess.Evaluate(new[] { invalid, udp }, app).Covered) throw new Exception("Invalid private rule accepted");
+    if (!FirewallAccess.Evaluate(new[] { tcp, udp, tcp with { Action = 0 } }, app).Blocked)
+        throw new Exception("Explicit application block ignored");
+    if (!FirewallAccess.Evaluate(new[] { tcp, udp, tcp with { Program = "", Action = 0, Protocol = 256 } }, app).Blocked)
+        throw new Exception("Global inbound block ignored");
+    if (!FirewallAccess.Evaluate(new[] { tcp with { Ports = "44000-45000" }, udp }, app).Covered)
+        throw new Exception("Port range allow rule rejected");
+}
+TestFirewallDecisions();
+
 if (!NativeUpdateService.IsNewerVersion("v0.6.0", new Version(0,5,0))) throw new Exception("Native update version detection failed");
 if (NativeUpdateService.IsNewerVersion("v0.5.0", new Version(0,5,0))) throw new Exception("Same version should not upgrade");
 if (NativeUpdateService.IsNewerVersion("v0.3.0", new Version(0,5,0))) throw new Exception("Legacy release should not downgrade");
