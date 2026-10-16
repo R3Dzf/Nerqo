@@ -46,6 +46,8 @@ internal sealed class FolderRecord
     public string DirectoryName { get; set; } = "";
     public DateTimeOffset Created { get; set; } = DateTimeOffset.UtcNow;
 }
+public sealed record OutgoingFolderFile(string Path, long Size, string Sha256);
+internal sealed record OutgoingFolder(string Root, string Name, List<string> Directories, Dictionary<string, OutgoingFolderFile> Files);
 public sealed record PairedDevice(string TokenHash, string Name, DateTimeOffset Expires);
 internal sealed class PeerRecord
 {
@@ -69,6 +71,7 @@ public sealed class LanHost : IAsyncDisposable
     private const long MaxFile = 2L * 1024 * 1024 * 1024 * 1024;
     private readonly object gate = new();
     private readonly ConcurrentDictionary<string, Queue<DateTimeOffset>> attempts = new();
+    private readonly ConcurrentDictionary<string, OutgoingFolder> outgoingFolders = new();
     private readonly string root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Nerqo");
     private PersistedData state = new();
     private readonly X509Certificate2 tlsCertificate;
@@ -461,6 +464,39 @@ public sealed class LanHost : IAsyncDisposable
                 return Results.Json(new { id, name = t.Name, size = t.Size, sha256 = hash });
             }
         });
+        // A native folder never gets packed into ZIP. Android requests a
+        // manifest and saves each member into its selected SAF document tree.
+        app.MapGet("/api/outgoing-folders/{id}/manifest", (string id, HttpContext ctx) =>
+        {
+            if (Authorize(ctx) == null) return Unauthorized();
+            ValidId(id);
+            if (!outgoingFolders.TryGetValue(id, out var folder)) return Results.NotFound();
+            return Results.Json(new
+            {
+                name = folder.Name,
+                directories = folder.Directories,
+                files = folder.Files.Values.OrderBy(f => f.Path).ToArray()
+            });
+        });
+        app.MapGet("/api/outgoing-folders/{id}/file", (string id, HttpContext ctx) =>
+        {
+            if (Authorize(ctx) == null) return Unauthorized();
+            ValidId(id);
+            if (!outgoingFolders.TryGetValue(id, out var folder)) return Results.NotFound();
+            string relative = ValidFolderPath(ctx.Request.Query["path"].ToString());
+            if (!folder.Files.TryGetValue(relative, out var member)) return Results.NotFound();
+            string physical = folder.Root;
+            foreach (var component in relative.Split('/'))
+            {
+                physical = Path.Combine(physical, component);
+                if ((File.GetAttributes(physical) & FileAttributes.ReparsePoint) != 0)
+                    return Results.StatusCode(403);
+            }
+            if (!File.Exists(physical) || new FileInfo(physical).Length != member.Size)
+                return Results.Conflict();
+            ctx.Response.Headers["X-SHA256"] = member.Sha256;
+            return Results.File(physical, "application/octet-stream", enableRangeProcessing: true);
+        });
         app.MapGet("/api/files/{id}", (string id, HttpContext ctx) =>
         {
             if (Authorize(ctx) == null) return Unauthorized();
@@ -498,6 +534,60 @@ public sealed class LanHost : IAsyncDisposable
     /// paths and empty directories. Reparse points are skipped to prevent the
     /// selected folder from escaping into unrelated filesystem locations.
     /// </summary>
+    /// <summary>Native folder sharing: no archive and no duplicate storage.</summary>
+    public async Task ShareFolderDirectAsync(string path, IProgress<int>? progress = null,
+        CancellationToken ct = default)
+    {
+        var rootInfo = new DirectoryInfo(path);
+        if (!rootInfo.Exists || rootInfo.Attributes.HasFlag(FileAttributes.ReparsePoint))
+            throw new IOException("Choose an accessible folder, not a junction.");
+        string folderName = ValidFolderPath(rootInfo.Name);
+        var dirs = new List<string>();
+        var memberFiles = new Dictionary<string, OutgoingFolderFile>(StringComparer.Ordinal);
+        long total = 0;
+        int entries = 0;
+        async Task Scan(DirectoryInfo directory, string prefix, int depth)
+        {
+            if (depth > 64) throw new IOException("Folder is nested too deeply.");
+            foreach (var entry in directory.EnumerateFileSystemInfos())
+            {
+                ct.ThrowIfCancellationRequested();
+                if (++entries > 100000) throw new IOException("Too many folder members.");
+                if (entry.Attributes.HasFlag(FileAttributes.ReparsePoint)) continue;
+                string relative = ValidFolderPath(prefix.Length == 0
+                    ? entry.Name : prefix + "/" + entry.Name);
+                if (entry is DirectoryInfo sub)
+                {
+                    dirs.Add(relative);
+                    await Scan(sub, relative, depth + 1);
+                }
+                else if (entry is FileInfo file)
+                {
+                    if (file.Length > MaxFile - total)
+                        throw new IOException("Folder exceeds transfer limit.");
+                    total += file.Length;
+                    await using var stream = new FileStream(file.FullName, FileMode.Open,
+                        FileAccess.Read, FileShare.Read, 1024 * 1024, FileOptions.Asynchronous);
+                    string hash = Hex(await SHA256.HashDataAsync(stream, ct));
+                    memberFiles.Add(relative, new OutgoingFolderFile(relative, file.Length, hash));
+                }
+                progress?.Report(entries);
+            }
+        }
+        await Scan(rootInfo, "", 0);
+        string id = Id();
+        outgoingFolders[id] = new OutgoingFolder(rootInfo.FullName, folderName, dirs, memberFiles);
+        lock (gate)
+        {
+            state.Items.Add(new TransferItem
+            {
+                Id = id, Kind = "folder", Sender = "Windows",
+                Content = folderName, Size = total,
+            });
+            Save();
+        }
+    }
+
     public async Task ShareFolderAsync(string path, IProgress<int>? progress = null, CancellationToken ct = default)
     {
         var directory = new DirectoryInfo(path);

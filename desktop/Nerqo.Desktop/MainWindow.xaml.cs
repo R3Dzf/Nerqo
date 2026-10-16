@@ -130,16 +130,16 @@ public partial class MainWindow : Window
     {
         using var dialog = new System.Windows.Forms.FolderBrowserDialog
         {
-            Description = "Choose a folder to send as a ZIP (including subfolders and empty folders)",
+            Description = "Choose a folder to transfer directly to Android",
             UseDescriptionForTitle = true,
             ShowNewFolderButton = false
         };
         if (dialog.ShowDialog() != System.Windows.Forms.DialogResult.OK) return;
         try
         {
-            FooterLabel.Text = "Preparing folder archive…";
-            await service.ShareFolderAsync(dialog.SelectedPath, new Progress<int>(n => FooterLabel.Text = $"Packing folder: {n} entries"));
-            FooterLabel.Text = "Folder ready on Android as a ZIP archive";
+            FooterLabel.Text = "Preparing native folder manifest…";
+            await service.ShareFolderDirectAsync(dialog.SelectedPath, new Progress<int>(n => FooterLabel.Text = $"Scanning folder: {n} members"));
+            FooterLabel.Text = "Folder ready for direct download on Android";
         }
         catch (Exception ex)
         {

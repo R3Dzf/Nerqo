@@ -31,7 +31,7 @@
           <TextBlock Text="SEND TO ANDROID" Foreground="{StaticResource Accent}" FontSize="12" FontWeight="Bold" />
           <TextBlock Text="Your paired phone will see shared files and notes here." Foreground="{StaticResource Muted}" Margin="0,10,0,12" TextWrapping="Wrap"/>
           <Button Content="Choose file to share…" Click="ShareFile"/>
-          <Button Content="Choose folder to share (ZIP)…" Click="ShareFolder" Margin="0,8,0,0" ToolTip="Preserves all nested files and empty directories in an archive."/>
+          <Button Content="Share folder directly…" Click="ShareFolder" Margin="0,8,0,0" ToolTip="Send nested files without creating a temporary ZIP."/>
           <TextBlock Text="Text or URL" Foreground="{StaticResource Muted}" Margin="0,12,0,6" />
           <TextBox Name="NoteInput" Height="78" TextWrapping="Wrap" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" />
           <Button Content="Send text / link" Click="ShareNote" Margin="0,12,0,0"/>

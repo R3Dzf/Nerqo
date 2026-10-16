@@ -256,6 +256,38 @@ if (refusedFinish.StatusCode != System.Net.HttpStatusCode.UnprocessableEntity)
 if ((await client.GetAsync($"/api/files/{badId}")).StatusCode != System.Net.HttpStatusCode.NotFound)
     throw new Exception("Corrupt transferred file was published");
 
+
+// Windows -> Android native folder manifest: no ZIP, no archive staging.
+string directSource = Path.Combine(Path.GetTempPath(), "NerqoDirect-" + Guid.NewGuid().ToString("N"));
+try
+{
+    Directory.CreateDirectory(Path.Combine(directSource, "images", "empty"));
+    byte[] originalDirect = Encoding.UTF8.GetBytes("native folder transport");
+    await File.WriteAllBytesAsync(Path.Combine(directSource, "images", "image.txt"), originalDirect);
+    await host.ShareFolderDirectAsync(directSource);
+    var directItem = host.Items.FirstOrDefault(x => x.Kind == "folder"
+        && x.Content == Path.GetFileName(directSource))
+        ?? throw new Exception("Native outgoing folder not advertised");
+    var manifestResponse = await client.GetAsync($"/api/outgoing-folders/{directItem.Id}/manifest");
+    manifestResponse.EnsureSuccessStatusCode();
+    var manifest = await manifestResponse.Content.ReadFromJsonAsync<JsonElement>();
+    if (!manifest.GetProperty("directories").EnumerateArray()
+        .Any(x => x.GetString() == "images/empty")) throw new Exception("Empty direct folder missing");
+    if (!manifest.GetProperty("files").EnumerateArray()
+        .Any(x => x.GetProperty("path").GetString() == "images/image.txt"))
+        throw new Exception("Nested file missing from direct manifest");
+    var file = await client.GetByteArrayAsync(
+        $"/api/outgoing-folders/{directItem.Id}/file?path=images%2Fimage.txt");
+    if (!file.SequenceEqual(originalDirect)) throw new Exception("Direct member bytes modified");
+    foreach (var unsafePath in new[] { "..%2Fsecret", "%2Froot", "images%2F..%2Fsecret", "CON" })
+    {
+        var response = await client.GetAsync(
+            $"/api/outgoing-folders/{directItem.Id}/file?path={unsafePath}");
+        if (response.IsSuccessStatusCode) throw new Exception("Unsafe direct path accepted");
+    }
+}
+finally { if (Directory.Exists(directSource)) Directory.Delete(directSource, true); }
+
 var devices = host.PairedDevices;
 if (devices.Count == 0 || !host.RevokePeer(devices[0].TokenHash)) throw new Exception("Cannot revoke paired device");
 if ((await client.GetAsync("/api/items")).StatusCode != System.Net.HttpStatusCode.Unauthorized) throw new Exception("Revoked token still works");
