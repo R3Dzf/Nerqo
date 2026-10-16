@@ -55,37 +55,52 @@ class TransferService : Service() {
         getSystemService(NotificationManager::class.java).createNotificationChannel(
             NotificationChannel("transfers", "File transfers", NotificationManager.IMPORTANCE_LOW))
     }
-    private fun notification(detail: String, fraction: Float): Notification {
-        val flags = PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-        val open = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), flags)
-        fun action(name: String) = PendingIntent.getService(this, if (name == "pause") 1 else 2,
-            Intent(this, TransferService::class.java).setAction(name), flags)
-        return Notification.Builder(this, "transfers").setSmallIcon(R.drawable.ic_transfer)
-            .setContentTitle(pendingTransfer?.title ?: "Nerqo transfer").setContentText(detail)
-            .setStyle(Notification.BigTextStyle().bigText(detail)).setContentIntent(open)
-            .setOngoing(true).setOnlyAlertOnce(true).setCategory(Notification.CATEGORY_PROGRESS)
-            .setProgress(100, (fraction * 100).toInt(), fraction <= 0)
-            .addAction(Notification.Action.Builder(null, "Pause", action("pause")).build())
-            .addAction(Notification.Action.Builder(null, "Cancel", action("cancel")).build()).build()
+    private fun notification(detail: String, fraction: Float) =
+        TransferNotifications.build(this, pendingTransfer, "Running", detail, fraction, running = true)
+    private fun showOutcome(job: TransferJob, state: String, detail: String, fraction: Float) {
+        getSystemService(NotificationManager::class.java).notify(TransferNotifications.ID,
+            TransferNotifications.build(this, job, state, detail, fraction, running = false))
+    }
+    private fun promote(detail: String) {
+        val note = notification(detail, progress)
+        if (Build.VERSION.SDK_INT >= 29) startForeground(TransferNotifications.ID, note, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+        else startForeground(TransferNotifications.ID, note)
     }
     private fun showNotification(detail: String, fraction: Float) {
         if (destroyed || !TransferRuntime.running) return
         val now = SystemClock.elapsedRealtime()
         if (now - lastNotification < 1000) return
         lastNotification = now
-        getSystemService(NotificationManager::class.java).notify(44888, notification(detail, fraction))
+        getSystemService(NotificationManager::class.java).notify(TransferNotifications.ID, notification(detail, fraction))
     }
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        when (intent?.action) {
-            "pause" -> { transferControl?.interrupt(TransferStop.PAUSE, closeAsync = true); if (transferControl == null) stopSelf(); return START_NOT_STICKY }
-            "cancel" -> if (TransferRuntime.running) { transferControl?.interrupt(TransferStop.CANCEL, closeAsync = true); return START_NOT_STICKY }
-        }
-        if (TransferRuntime.running) return START_NOT_STICKY
-        val job = TransferJob.load(this) ?: run { stopSelf(); return START_NOT_STICKY }
+        val job = pendingTransfer ?: TransferJob.load(this)
         pendingTransfer = job
+        // Every notification action uses getForegroundService, including a stale action.
+        // Fulfil that contract before rejecting the action or stopping an empty session.
+        try { promote("Checking saved transfer…") }
+        catch (error: Exception) {
+            message = error.message ?: "Could not start background transfer"
+            stopSelf(); return START_NOT_STICKY
+        }
+        val actionJob = intent?.getStringExtra(TransferNotifications.JOB_ID)
+        if (job == null || (actionJob != null && actionJob != job.id)) {
+            if (!TransferRuntime.running) { stopForeground(STOP_FOREGROUND_REMOVE); stopSelf() }
+            return START_NOT_STICKY
+        }
+        if (TransferRuntime.running) {
+            when (intent?.action) {
+                "pause" -> transferControl?.interrupt(TransferStop.PAUSE, closeAsync = true)
+                "cancel" -> transferControl?.interrupt(TransferStop.CANCEL, closeAsync = true)
+            }
+            return START_NOT_STICKY
+        }
+        if (intent?.action == "pause") {
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            showOutcome(job, "Paused", "Resume from the saved checkpoint", progress)
+            stopSelf(); return START_NOT_STICKY
+        }
         try {
-            if (Build.VERSION.SDK_INT >= 29) startForeground(44888, notification("Checking saved transfer…", 0f), ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
-            else startForeground(44888, notification("Checking saved transfer…", 0f))
             wake = (getSystemService(POWER_SERVICE) as PowerManager).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "Nerqo:transfer").apply { acquire(6 * 60 * 60 * 1000L) }
             @Suppress("DEPRECATION")
             wifiLock = (applicationContext.getSystemService(WIFI_SERVICE) as WifiManager).createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "Nerqo:transfer").apply { acquire() }
@@ -93,7 +108,9 @@ class TransferService : Service() {
         } catch (error: Exception) {
             releaseLocks(); TransferRuntime.running = false
             transferUi = TransferUi(job.title, paused = true, detail = error.message ?: "Could not start background transfer")
-            stopForeground(STOP_FOREGROUND_REMOVE); stopSelf()
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            showOutcome(job, "Interrupted", transferUi!!.detail, progress)
+            stopSelf()
         }
         return START_NOT_STICKY
     }
@@ -104,7 +121,9 @@ class TransferService : Service() {
     // Android 15 data-sync time budget: save a checkpoint and stop promptly.
     override fun onTimeout(startId: Int, fgsType: Int) {
         transferControl?.interrupt(TransferStop.PAUSE, closeAsync = true)
-        stopForeground(STOP_FOREGROUND_REMOVE); stopSelf()
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        pendingTransfer?.let { showOutcome(it, "Paused", "Android background time limit reached. Open Nerqo to resume.", progress) }
+        stopSelf()
     }
     override fun onDestroy() {
         destroyed = true
@@ -131,6 +150,8 @@ class TransferService : Service() {
             val destination = Device(job.deviceName, job.host, job.port)
             val access = prefs.getString("token_${job.host}", null)
             rememberTransfer(job, "Running")
+            var outcome = "Interrupted"
+            var outcomeDetail = "Transfer saved. Resume from the last checkpoint."
             try {
                 LocalNetwork.bind(this)
                 if (cancelOnly) throw TransferCancelled()
@@ -201,6 +222,8 @@ class TransferService : Service() {
                 if (job.kind.startsWith("download") && job.entry != null) ReceiptOutbox.enqueue(this, job)
                 TransferJob.clear(this)
                 rememberTransfer(job, "Completed")
+                outcome = "Completed"
+                outcomeDetail = "Transfer completed and SHA-256 verified"
                 runCatching { NativeClient.cleanSession(this, destination, access, job.id, cancel = false) }
                 onMain { pendingTransfer = null; transferUi = null; message = "Transfer completed and SHA-256 verified" }
             } catch (error: Exception) {
@@ -208,9 +231,13 @@ class TransferService : Service() {
                     runCatching { NativeClient.cleanSession(this, destination, access, job.id, cancel = true) }
                     TransferJob.clear(this)
                     rememberTransfer(job, "Cancelled")
+                    outcome = "Cancelled"
+                    outcomeDetail = "Transfer cancelled. Completed files were kept."
                     onMain { pendingTransfer = null; transferUi = null; message = "Transfer cancelled. Completed files were kept." }
                 } else {
                     val paused = control.stop == TransferStop.PAUSE || error is TransferPaused
+                    outcome = if (paused) "Paused" else "Interrupted"
+                    outcomeDetail = if (paused) "Resume from the saved checkpoint" else (error.message ?: "Connection interrupted. Resume from the saved checkpoint.")
                     rememberTransfer(job, if (paused) "Paused" else "Interrupted", if (paused) "" else error.message ?: "Transfer interrupted")
                     onMain {
                         transferUi = (transferUi ?: TransferUi(job.title)).copy(paused = true, detail = if (control.stop == TransferStop.PAUSE || error is TransferPaused) "Paused · Resume from the saved checkpoint" else "Interrupted · " + (error.message ?: "Try again"))
@@ -221,7 +248,12 @@ class TransferService : Service() {
                 ReceiptOutbox.schedule(this)
                 releaseLocks()
                 TransferControl.workerActive.set(false)
-                onMain { TransferRuntime.running = false; transferControl = null; progress = 0f; stopForeground(STOP_FOREGROUND_REMOVE); stopSelf() }
+                onMain {
+                    TransferRuntime.running = false; transferControl = null
+                    stopForeground(STOP_FOREGROUND_REMOVE)
+                    if (!destroyed) showOutcome(job, outcome, outcomeDetail, if (outcome == "Completed") 1f else progress)
+                    progress = 0f; stopSelf()
+                }
             }
         }
     }

@@ -156,6 +156,13 @@ class NativeTransportTest {
         assertThrows(IOException::class.java) {
             control.run { NativeClient.download(context, device, token, entry, target, job.id) { done, _ -> pauseAtFourMiB(control, done) } }
         }
+        // Stage a second, independent upload for the external foreground-service UI check.
+        val source = uri("ui-upload.bin")
+        context.contentResolver.openOutputStream(source, "wt")!!.use { it.write(content) }
+        val uploadJob = TransferJob(kind = "uploadFiles", title = "Background upload fixture", host = device.address,
+            port = device.port, deviceName = device.name, fingerprint = fingerprint, uris = listOf(source.toString()))
+        java.io.File(context.filesDir, "ui-upload-pending.xml").writeText(
+            "<map><string name=\"pending\">" + android.text.TextUtils.htmlEncode(uploadJob.json().toString()) + "</string></map>")
         job.save(context)
         context.getSharedPreferences("nerqo_native", 0).edit().putString("host", device.address).putInt("port", device.port)
             .putString("name", device.name).putString("token_${device.address}", token)

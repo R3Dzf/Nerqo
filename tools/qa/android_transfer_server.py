@@ -17,6 +17,8 @@ TOKEN = 'nerqo-emulator-fixture-token'
 lock = threading.Lock()
 state = {'offset': 0, 'published': 0, 'range_offsets': [], 'finish_dropped': False, 'upload_chunks': []}
 upload = bytearray()
+ui_upload = bytearray()
+ui_uploaded = False
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -41,7 +43,7 @@ class Handler(BaseHTTPRequestHandler):
         route = urlsplit(self.path)
         if route.path == '/api/status':
             with lock: self.json({'name': 'CI Windows fixture', 'port': 44888, 'version': '1.0.3', 'transferProtocol': 2,
-                                  'published': state['published'], 'ranges': state['range_offsets'], 'uploadChunks': state['upload_chunks']})
+                                  'uiUploadOffset': len(ui_upload), 'uiUploaded': ui_uploaded, 'uiUploadSha256': hashlib.sha256(ui_upload).hexdigest() if ui_uploaded else '', 'published': state['published'], 'ranges': state['range_offsets'], 'uploadChunks': state['upload_chunks']})
             return
         if not self.authenticated(): return
         if route.path == '/api/items':
@@ -73,12 +75,23 @@ class Handler(BaseHTTPRequestHandler):
         except (OSError, ssl.SSLError):
             pass
     def do_POST(self):
+        global ui_uploaded
         if not self.authenticated(): return
         request = json.loads(self.body() or b'{}')
         route = urlsplit(self.path)
         if route.path == '/api/receipts':
             if request.get('id') not in (SINGLE, UI): self.json({}, 400); return
             self.json({'ok': True}); return
+        if route.path == '/api/transfers/begin' and request.get('name') == 'ui-upload.bin':
+            with lock:
+                self.json({'id': 'b'*32, 'offset': len(ui_upload), 'size': len(UI_DATA), 'complete': ui_uploaded, 'sha256': UI_SHA})
+            return
+        if route.path == '/api/transfers/' + 'b'*32 + '/finish':
+            with lock:
+                if bytes(ui_upload) != UI_DATA or parse_qs(route.query).get('sha256') != [UI_SHA]:
+                    self.json({'error': 'wrong UI upload payload'}, 422); return
+                ui_uploaded = True
+            self.json({'id': 'b'*32, 'sha256': UI_SHA, 'size': len(UI_DATA)}); return
         if route.path == '/api/transfers/begin':
             with lock:
                 if state['published']:
@@ -100,6 +113,20 @@ class Handler(BaseHTTPRequestHandler):
         self.json({}, 404)
     def do_PUT(self):
         if not self.authenticated(): return
+        if urlsplit(self.path).path == '/api/transfers/' + 'b'*32 + '/chunk':
+            remaining = int(self.headers.get('Content-Length', '0'))
+            pieces = []
+            while remaining:
+                piece = self.rfile.read(min(65536, remaining))
+                if not piece: return
+                pieces.append(piece); remaining -= len(piece); time.sleep(.04)
+            block = b''.join(pieces)
+            with lock:
+                if int(self.headers.get('X-Offset', '-1')) != len(ui_upload) or hashlib.sha256(block).hexdigest() != self.headers.get('X-SHA256'):
+                    self.json({}, 409); return
+                ui_upload.extend(block)
+                self.json({'offset': len(ui_upload)})
+            return
         block = self.body()
         with lock:
             if int(self.headers.get('X-Offset', '-1')) != state['offset'] or hashlib.sha256(block).hexdigest() != self.headers.get('X-SHA256'):

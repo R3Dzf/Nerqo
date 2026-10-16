@@ -4,6 +4,9 @@ Instrumentation leaves a real, interrupted TLS/SAF download for UI recovery.
 """
 from pathlib import Path
 import hashlib
+import json
+import ssl
+from urllib.request import urlopen
 import re
 import subprocess
 import time
@@ -94,6 +97,27 @@ def resume(must_be_active=False):
     failure('Resume did not start a transfer', tree)
 
 
+def notification(state, *actions):
+    block = ''
+    for _ in range(12):
+        dump = adb('shell', 'dumpsys', 'notification', '--noredact')
+        active = dump.split('Notification List:', 1)[-1].split('Ranking Config', 1)[0]
+        for record in active.split('NotificationRecord(')[1:]:
+            if 'pkg=com.r3dzf.nerqo ' in record and 'id=44888 ' in record:
+                block = record
+                break
+        if re.search(r'android.title=.*' + state + r' · \d+%', block) and all(action in block for action in actions):
+            (OUTPUT / f'notification-{state.lower()}.txt').write_text(block)
+            return
+        time.sleep(.5)
+    failure(f'Transfer notification missing {state}, percentage or actions {actions}')
+
+
+def fixture_status():
+    with urlopen('https://127.0.0.1:44888/api/status', context=ssl._create_unverified_context(), timeout=5) as response:
+        return json.load(response)
+
+
 adb('shell', 'input', 'keyevent', 'KEYCODE_WAKEUP')
 adb('shell', 'wm', 'dismiss-keyguard')
 # Instrumentation owns the target process. Relaunch from a stopped process so
@@ -109,10 +133,16 @@ tap('Transfers')
 capture('Transfer-restored')
 resume(must_be_active=True)
 time.sleep(1)
+notification('Receiving', 'Pause', 'Cancel')
 tap('Pause')
 time.sleep(1)
 capture('Transfer-paused')
-resume(must_be_active=True)
+notification('Paused', 'Resume', 'Cancel')
+# Resume from the real notification action, without opening the app.
+adb('shell', 'cmd', 'statusbar', 'expand-notifications')
+tap('Resume')
+adb('shell', 'cmd', 'statusbar', 'collapse')
+notification('Receiving', 'Pause', 'Cancel')
 # The foreground service must keep writing while the Activity is stopped and screen is off.
 before = int(adb('shell', 'run-as', 'com.r3dzf.nerqo', 'stat', '-c', '%s', 'cache/transport-fixtures/ui-resume.bin').strip())
 adb('shell', 'settings', 'put', 'global', 'always_finish_activities', '1')
@@ -144,11 +174,54 @@ for _ in range(25):
 else:
     failure('Native UI transfer did not complete after resume', tree)
 capture('Transfers')
+notification('Completed')
 received = adb('exec-out', 'run-as', 'com.r3dzf.nerqo', 'cat', 'cache/transport-fixtures/ui-resume.bin', binary=True)
 expected = bytes(range(256)) * (64 * 4096) + b'ui'
 if hashlib.sha256(received).digest() != hashlib.sha256(expected).digest():
     raise RuntimeError('UI-resumed document does not match the TLS source')
 (OUTPUT / 'transfer-verification.txt').write_text('PASS: restored download; native Pause/Resume; screen-off foreground service kept writing; final size and SHA-256 match source.\n')
+# Now verify sending while the Activity is stopped, using a separate saved job.
+adb('shell', 'am', 'force-stop', 'com.r3dzf.nerqo')
+adb('shell', 'run-as', 'com.r3dzf.nerqo', 'cp', 'files/ui-upload-pending.xml', 'shared_prefs/nerqo_jobs.xml')
+adb('shell', 'am', 'start', '-W', '-n', 'com.r3dzf.nerqo/.MainActivity')
+tap('Transfers')
+resume(must_be_active=True)
+notification('Sending', 'Pause', 'Cancel')
+# Pause from the notification too, proving its actions reach the service.
+adb('shell', 'cmd', 'statusbar', 'expand-notifications')
+tap('Pause')
+adb('shell', 'cmd', 'statusbar', 'collapse')
+notification('Paused', 'Resume', 'Cancel')
+adb('shell', 'cmd', 'statusbar', 'expand-notifications')
+tap('Resume')
+adb('shell', 'cmd', 'statusbar', 'collapse')
+notification('Sending', 'Pause', 'Cancel')
+before_upload = fixture_status()['uiUploadOffset']
+adb('shell', 'settings', 'put', 'global', 'always_finish_activities', '1')
+adb('shell', 'input', 'keyevent', 'KEYCODE_HOME')
+adb('shell', 'input', 'keyevent', 'KEYCODE_SLEEP')
+time.sleep(8)
+service = adb('shell', 'dumpsys', 'activity', 'services', 'com.r3dzf.nerqo')
+(OUTPUT / 'background-upload-service.txt').write_text(service)
+if 'TransferService' not in service or 'isForeground=true' not in service:
+    failure('Upload has no foreground service with the screen off')
+if fixture_status()['uiUploadOffset'] <= before_upload:
+    failure('No additional upload bytes committed with screen off')
+for _ in range(60):
+    status = fixture_status()
+    if status['uiUploaded']:
+        break
+    time.sleep(1)
+else:
+    failure('Background upload did not complete')
+if status['uiUploadSha256'] != hashlib.sha256(expected).hexdigest():
+    failure('Background upload SHA-256 differs from source')
+notification('Completed')
+adb('shell', 'input', 'keyevent', 'KEYCODE_WAKEUP')
+adb('shell', 'wm', 'dismiss-keyguard')
+adb('shell', 'settings', 'put', 'global', 'always_finish_activities', '0')
+adb('shell', 'am', 'start', '-W', '-n', 'com.r3dzf.nerqo/.MainActivity')
+(OUTPUT / 'upload-verification.txt').write_text('PASS: actual 64 MiB TLS/SAF upload; notification Sending/percentage/Pause/Resume; foreground service committed data with Activity stopped and screen off; remote SHA-256 matches; Completed notification.\n')
 tap('History')
 capture('History')
 tap('Settings')

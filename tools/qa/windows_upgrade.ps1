@@ -3,6 +3,7 @@ param(
     [Parameter(Mandatory=$true)][string]$NewInstaller
 )
 $ErrorActionPreference = 'Stop'
+if ($env:GITHUB_ACTIONS -ne 'true') { throw 'This fixture requires an isolated GitHub Actions Windows runner' }
 $installPath = Join-Path $env:LOCALAPPDATA 'Programs\Nerqo-Upgrade-Smoke'
 $dataRoot = Join-Path $env:LOCALAPPDATA 'Nerqo'
 $appPath = Join-Path $installPath 'Nerqo.exe'
@@ -23,7 +24,14 @@ function Start-Nerqo {
     Write-Host "Starting installed app: $appPath"
     $script:appProcess = Start-Process -FilePath $appPath -ArgumentList '--upgrade-smoke' -PassThru
     for ($attempt = 0; $attempt -lt 30; $attempt++) {
-        if ($script:appProcess.HasExited) { throw 'Installed native app exited unexpectedly' }
+        if ($script:appProcess.HasExited) {
+            $exitCode = $script:appProcess.ExitCode
+            Get-Process Nerqo -ErrorAction SilentlyContinue | Select-Object Id, Path | Out-Host
+            Get-WinEvent -FilterHashtable @{ LogName='Application'; StartTime=(Get-Date).AddMinutes(-5) } -ErrorAction SilentlyContinue |
+                Where-Object { $_.ProviderName -in @('.NET Runtime', 'Application Error') -and $_.Message -match 'Nerqo' } |
+                Select-Object -First 3 TimeCreated, ProviderName, Message | Out-Host
+            throw "Installed native app exited unexpectedly (exit $exitCode)"
+        }
         try {
             $status = Invoke-RestMethod 'https://127.0.0.1:44888/api/status' -SkipCertificateCheck -TimeoutSec 2
             return $status
@@ -37,6 +45,10 @@ function Stop-Nerqo {
         $script:appProcess.WaitForExit()
     }
 }
+# HostSmoke has just written current-version state. Keep it aside: starting the
+# previous binary on that state would test a downgrade before the real upgrade.
+$previousFixture = "$dataRoot-transport-qa-$([Guid]::NewGuid().ToString('N'))"
+if (Test-Path -LiteralPath $dataRoot) { Move-Item -LiteralPath $dataRoot -Destination $previousFixture }
 try {
     Install-Nerqo $OldInstaller
     $old = Start-Nerqo
@@ -87,4 +99,12 @@ try {
     New-Item -ItemType Directory -Force dist/qa | Out-Null
     'PASS: per-user installer 1.0.8 -> 1.0.9; running old process closed; executable replaced; one installed-app entry; installed native receiver; persistent TLS identity; paired token; shared note; received file preserved.' | Set-Content dist/qa/windows-upgrade.txt
     Get-Content dist/qa/windows-upgrade.txt
-} finally { Stop-Nerqo }
+} finally {
+    Stop-Nerqo
+    # Keep the upgrade fixture for CI diagnostics. Do not merge incompatible test state.
+    if (Test-Path -LiteralPath $previousFixture) {
+        $upgradeFixture = "$dataRoot-upgrade-qa-$([Guid]::NewGuid().ToString('N'))"
+        if (Test-Path -LiteralPath $dataRoot) { Move-Item -LiteralPath $dataRoot -Destination $upgradeFixture }
+        Move-Item -LiteralPath $previousFixture -Destination $dataRoot
+    }
+}
