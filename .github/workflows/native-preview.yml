@@ -24,6 +24,19 @@ jobs:
           dotnet-version: 9.0.x
       - name: Compile native WPF app
         run: dotnet publish desktop/Nerqo.Desktop/Nerqo.Desktop.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:PublishReadyToRun=false -o dist/Windows
+      - name: Capture actual WPF screens
+        shell: pwsh
+        run: |
+          $app = Start-Process -FilePath "$pwd/dist/Windows/Nerqo.exe" -ArgumentList '--ui-smoke' -PassThru
+          if (-not $app.WaitForExit(60000)) { $app.Kill(); throw 'UI smoke timed out' }
+          if ($app.ExitCode -ne 0) { throw "UI smoke exit: $($app.ExitCode)" }
+          foreach ($screen in @('Transfers', 'Devices', 'Settings', 'Transfers-dark')) {
+            if (-not (Test-Path "ui-smoke/$screen.png")) { throw "Missing UI screenshot: $screen" }
+          }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Nerqo-Windows-UI
+          path: ui-smoke/*.png
       - name: Execute native LAN transport smoke test
         run: dotnet run --project desktop/Nerqo.HostSmoke/Nerqo.HostSmoke.csproj -c Release
       - name: Build normal Windows installer
@@ -60,7 +73,7 @@ jobs:
         run: python -m unittest discover -s tests -q
       - name: Compile Compose debug APK
         working-directory: android
-        run: gradle :app:assembleDebug --stacktrace --no-daemon
+        run: gradle :app:assembleDebug :app:testDebugUnitTest --stacktrace --no-daemon
       - name: Compile unsigned native release APK
         working-directory: android
         run: gradle :app:assembleRelease --no-daemon

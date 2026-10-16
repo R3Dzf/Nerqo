@@ -16,8 +16,8 @@ class NativeSigningTests(unittest.TestCase):
         self.assertIn("class MainActivity : ComponentActivity()", android)
         self.assertIn("setContent { NativeScreen() }", android)
         self.assertNotIn("WebView", xaml)
-        self.assertIn("Share folder directly", xaml)
-        self.assertIn("Send folder directly", android)
+        self.assertIn('Click="ShareFolder"', xaml)
+        self.assertIn("folderPicker.launch(null)", android)
         self.assertIn("FolderTransfer.send", android)
         self.assertIn("FolderReceiver.receive", android)
         self.assertIn("outgoingFolderManifest", (ROOT / "android/app/src/main/java/com/r3dzf/nerqo/NativeClient.kt").read_text())
@@ -49,7 +49,7 @@ class NativeSigningTests(unittest.TestCase):
         self.assertTrue(all((w, i, a)))
         self.assertEqual(w.group(1), i.group(1))
         self.assertEqual(w.group(1), a.group(1))
-        self.assertIn("versionCode = 10000", gradle)
+        self.assertIn("versionCode = 10001", gradle)
 
     def test_native_signed_release_verification(self):
         wf = (ROOT / ".github/workflows/release.yml").read_text()

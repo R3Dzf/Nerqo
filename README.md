@@ -4,7 +4,7 @@
 
 Nerqo is a native Windows and Android application for transferring files, folders, links and text over a local network. A router does not need internet access; the devices can also use an Android hotspot.
 
-> **Development branch:** `dev/native-5ghz-20261016`. Version 1.0.0 has passed the native Windows/Android CI and has been built as a Windows installer plus a privately signed Android APK. These files have not yet been published as an official GitHub Release, and real-device acceptance tests remain outstanding. The `main` branch and older v0.3.0 release are unchanged.
+> **Development branch:** `dev/native-5ghz-20261016`. Native 1.0.1 adds matching Windows/Android screens, a new app identity and verified folder receive retry. Native CI artifacts are development builds; no official Stable release is claimed. Physical-device acceptance and permanent Android release signing remain required. The `main` branch and older v0.3.0 release are unchanged.
 
 ## Native applications
 
@@ -16,6 +16,10 @@ Nerqo is a native Windows and Android application for transferring files, folder
 | No browser or visible command window | No WebView, browser or cloud relay |
 
 The old `app.py` / `web/` implementation is retained for migration tests only. It is **not** shipped as the new native Windows app.
+
+## A calmer workspace
+
+Both apps organize sharing into **Transfers**, **Devices** and **Settings**, with matching teal/mint identity and persistent light/dark appearance. Windows accepts files and folders dragged into its window. Android keeps operation progress visible across sections and reads the clipboard only when you tap **Paste**. The same scalable file-exchange mark appears in the Windows executable, installer and tray, and the Android adaptive/themed launcher.
 
 ## Getting connected
 
@@ -33,7 +37,7 @@ The old `app.py` / `web/` implementation is retained for migration tests only. I
 - Windows → Android: share one or more files or a complete folder **directly**, preserving nested directories and empty folders without ZIP staging.
 - Android → Windows: send files with the document picker or Android's Share menu; use **Send folder directly** to transfer an SAF-selected folder file by file, without temporary ZIP staging.
 - Both folder directions stream files over HTTPS with verified SHA-256. Windows lists folder members in a manifest, and Android creates a folder tree using the system document provider.
-- Android → Windows direct folder transfers persist each file’s resumable upload session. Windows → Android saves members directly to the selected Android folder without ZIP staging. Full-folder download resume and live-device validation are still pending.
+- Android → Windows direct folder transfers persist each file’s resumable upload session. Windows → Android saves members directly to the selected Android folder without ZIP staging. Android folder receiving can retry into the same destination: previously completed members are rehashed and skipped only with a matching transfer receipt. The active incomplete member restarts. Mid-file download resume and live-device validation are still pending.
 
 ## Wi-Fi / hotspot performance
 

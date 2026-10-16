@@ -1,24 +1,15 @@
-Nerqo v0.3.0 — DELTA UPDATE INTEGRATION (source + CI)
+Nerqo native 1.0.1 — development build
 
-IMPLEMENTED:
-- NRQDEL01 portable rsync-style binary delta codec (Windows Python + Android Java).
-- SHA-256 checks for base, downloaded asset and final reconstructed binary.
-- Windows packaged EXE: opt-in Check -> Download -> Install and restart, with rollback copy.
-- Android native app: opt-in update check, delta/full APK, Android installer prompt.
-- GitHub tag release pipeline publishes Windows EXE, stable-signed Android APK,
-  full assets, optional smaller-than-90%-full deltas and update-manifest.json.
-- No Internet required for Nerqo LAN file transfer; only checking/downloading app updates needs Internet.
+This iteration adds matching Windows/Android Transfers, Devices and Settings,
+a unified vector icon, persistent light/dark appearance, Windows file/folder
+drag-and-drop, visible operation feedback, and verified completed-file retry
+for Windows-to-Android folders.
 
-LIMITATIONS:
-- Android release publishing requires 4 GitHub Actions signing secrets using ONE
-  securely backed-up stable keystore (see docs/UPDATES.md). Never commit key.
-- Windows EXE update mechanism assumes installed app's folder is writable.
-- Windows EXE has no Authenticode publisher signature; see security notes.
-- v0.1.0 applications cannot self-update because they had no update client; from
-  v0.2.0 onward, future releases can use delta updates if old binaries match.
-- End-to-end upgrade smoke tests on real Android + Windows devices are still required.
-- Wi-Fi Direct, Bluetooth and encrypted LAN transport are separate roadmap items.
+The native clients use WPF and Compose. The legacy browser implementation is
+retained only for regression tests and is not shipped in the native installer.
 
-0.3.0: redesigned cross-device UI, native Android pairing screen,
-permanent release signing certificate pinned (identity outside public repo).
-Release requires GitHub Actions secrets; debug builds are not release-signed.
+Not yet an official Stable release. Native CI validation, permanent Android
+release signing, physical-device transfer and in-place upgrade checks must be
+reported separately. A Debug APK cannot update the permanent-key installation.
+Wi-Fi Direct and Bluetooth are not implemented. Windows Authenticode signing
+is not present. See docs/NATIVE_ROADMAP.md for all nine phases.

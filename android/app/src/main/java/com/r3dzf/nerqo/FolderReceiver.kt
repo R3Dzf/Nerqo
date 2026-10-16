@@ -5,6 +5,7 @@ import android.net.Uri
 import androidx.documentfile.provider.DocumentFile
 import java.io.IOException
 import org.json.JSONObject
+import java.security.MessageDigest
 
 /** Save Windows-selected folders natively into an Android SAF tree, no ZIP. */
 internal object FolderReceiver {
@@ -53,31 +54,65 @@ internal object FolderReceiver {
             return cursor
         }
         for (i in 0 until allDirs.length()) resolveDirectory(components(allDirs.getString(i)))
+        // Validate every member before any file download and calculate an overall byte total.
         var total = 0L
+        val seen = mutableSetOf<String>()
+        for (i in 0 until entries.length()) {
+            val member = entries.getJSONObject(i)
+            components(member.getString("path"))
+            if (!seen.add(member.getString("path"))) throw IOException("Duplicate folder member")
+            val length = member.getLong("size")
+            if (length < 0 || length > 2L * 1024 * 1024 * 1024 * 1024 - total)
+                throw IOException("Remote folder is too large")
+            if (!member.getString("sha256").matches(Regex("[0-9a-f]{64}"))) throw IOException("Invalid member checksum")
+            total += length
+        }
+        val prefs = context.getSharedPreferences("nerqo_folder_receipts", Context.MODE_PRIVATE)
+        val receiptScope = device.endpoint + "|" + id + "|" + root.uri
+        fun receiptKey(path: String) = MessageDigest.getInstance("SHA-256")
+            .digest((receiptScope + "|" + path).toByteArray(Charsets.UTF_8))
+            .joinToString("") { "%02x".format(it.toInt() and 0xff) }
+        var completed = 0L
         for (i in 0 until entries.length()) {
             val file = entries.getJSONObject(i)
             val relative = file.getString("path")
             val parts = components(relative)
             val expectedSize = file.getLong("size")
-            if (expectedSize < 0 || expectedSize > 2L * 1024 * 1024 * 1024 * 1024 - total)
-                throw IOException("Remote folder is too large")
-            total += expectedSize
+            val hash = file.getString("sha256")
+            val receiptKey = receiptKey(relative)
             val parent = resolveDirectory(parts.dropLast(1))
             val destinationName = parts.last()
-            if (parent.findFile(destinationName) != null)
-                throw IOException("Destination already contains " + relative + "; choose an empty folder")
+            val existing = parent.findFile(destinationName)
+            if (existing != null) {
+                // Only skip a file finalized by this exact transfer into this destination.
+                // Never overwrite an unrelated user file, or trust a receipt without hashing.
+                val owned = prefs.getString(receiptKey, null) == hash + "|" + existing.uri
+                val matches = owned && existing.isFile && context.contentResolver.openInputStream(existing.uri)?.use {
+                    TransferIntegrity.matches(it, expectedSize, hash)
+                } == true
+                if (!matches) throw IOException("Destination already contains a different or unverified file: " + relative)
+                completed += expectedSize
+                progress(i + 1, "Verified " + relative, completed, total)
+                continue
+            }
             val staging = parent.createFile("application/octet-stream",
                 destinationName + ".nerqo-part")
                 ?: throw IOException("Cannot create " + relative)
+            var finalized = false
             try {
                 NativeClient.saveOutgoingFolderFile(context, device, token, id, relative, expectedSize,
-                    file.getString("sha256"), staging.uri) { done, size ->
-                    progress(i + 1, relative, done, size)
+                    hash, staging.uri) { done, size ->
+                    progress(i + 1, relative, completed + done, total)
                 }
                 if (!staging.renameTo(destinationName))
                     throw IOException("Storage provider could not finalize " + relative)
+                finalized = true
+                if (!prefs.edit().putString(receiptKey, hash + "|" + staging.uri).commit())
+                    throw IOException("Could not save the folder retry receipt")
+                completed += expectedSize
+                progress(i + 1, relative, completed, total)
             } catch (error: Exception) {
-                staging.delete()
+                if (!finalized) staging.delete()
                 throw error
             }
         }

@@ -51,6 +51,8 @@ class MainActivity : ComponentActivity() {
         if (content != null) pairFromQr(content)
     }
     private val executor = Executors.newSingleThreadExecutor()
+    private var connected by mutableStateOf(false)
+    private var darkMode by mutableStateOf(false)
     private var device by mutableStateOf<Device?>(null)
     private var token by mutableStateOf<String?>(null)
     private var nearby by mutableStateOf<List<Device>>(emptyList())
@@ -71,6 +73,7 @@ class MainActivity : ComponentActivity() {
     private val prefs by lazy { getSharedPreferences("nerqo_native", MODE_PRIVATE) }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        darkMode = prefs.getBoolean("dark_mode", false)
         val host = prefs.getString("host", "") ?: ""
         val storedPort = prefs.getInt("port", 44888)
         if (isPrivateIPv4(host)) {
@@ -108,8 +111,8 @@ class MainActivity : ComponentActivity() {
         busy = true
         executor.execute {
             try { action() }
-            catch (e: Exception) { runOnUiThread { message = e.message ?: "Connection failed" } }
-            finally { runOnUiThread { busy = false } }
+            catch (e: Exception) { runOnUiThread { if (e is IOException) connected = false; message = e.message ?: "Connection failed" } }
+            finally { runOnUiThread { busy = false; progress = 0f } }
         }
     }
     private fun bindLocalNetwork() {
@@ -134,6 +137,9 @@ class MainActivity : ComponentActivity() {
     }
     private fun select(found: Device) {
         device = found
+        connected = false
+        token = null
+        entries = emptyList()
         previewFingerprint = ""
         fingerprintConfirmed = false
         prefs.edit().putString("host", found.address).putInt("port", found.port).putString("name", found.name).apply()
@@ -146,7 +152,7 @@ class MainActivity : ComponentActivity() {
                 val fresh = try { if (access != null) NativeClient.list(found, access) else emptyList() }
                     catch (_: PairingExpiredException) { prefs.edit().remove("token_${found.address}").apply(); emptyList() }
                 val approvedToken = if (access != null && prefs.getString("token_${found.address}", null) == access) access else null
-                runOnUiThread { token = approvedToken; entries = fresh; message = if (approvedToken == null) "Pair this device again" else "Verified secure Windows connection"; if (approvedToken == null) { previewFingerprint = discovered; showPair = true } }
+                runOnUiThread { connected = approvedToken != null; token = approvedToken; entries = fresh; message = if (approvedToken == null) "Pair this device again" else "Verified secure Windows connection"; if (approvedToken == null) { previewFingerprint = discovered; showPair = true } }
             } else {
                 runOnUiThread {
                     token = null
@@ -167,7 +173,7 @@ class MainActivity : ComponentActivity() {
             val saved = NativeClient.pair(current, pinText)
             prefs.edit().putString("cert_${current.address}:${current.port}", confirmedIdentity)
                 .putString("token_${current.address}", saved).apply()
-            runOnUiThread { token = saved; showPair = false; pinText = ""; fingerprintConfirmed = false; message = "Securely paired with ${current.name}" }
+            runOnUiThread { connected = true; token = saved; showPair = false; pinText = ""; fingerprintConfirmed = false; message = "Securely paired with ${current.name}" }
             val fresh = NativeClient.list(current, saved)
             runOnUiThread { entries = fresh }
         }
@@ -178,11 +184,11 @@ class MainActivity : ComponentActivity() {
         task {
             try {
                 val fresh = NativeClient.list(d, access)
-                runOnUiThread { entries = fresh; message = "Connected to ${d.name}" }
+                runOnUiThread { connected = true; entries = fresh; message = "Connected to ${d.name}" }
             } catch (_: PairingExpiredException) {
                 val identity = NativeClient.previewIdentity(d)
                 prefs.edit().remove("token_${d.address}").apply()
-                runOnUiThread { token = null; entries = emptyList(); previewFingerprint = identity; fingerprintConfirmed = false; showPair = true; message = "Device access expired or was revoked. Verify Windows again." }
+                runOnUiThread { connected = false; token = null; entries = emptyList(); previewFingerprint = identity; fingerprintConfirmed = false; showPair = true; message = "Device access expired or was revoked. Verify Windows again." }
             }
         }
     }
@@ -299,7 +305,7 @@ class MainActivity : ComponentActivity() {
                         .putString("cert_${candidate.address}:${candidate.port}", fp)
                         .putString("token_${candidate.address}", newToken).apply()
                     runOnUiThread {
-                        device = candidate; token = newToken; entries = newEntries; nearby = listOf(candidate)
+                        connected = true; device = candidate; token = newToken; entries = newEntries; nearby = listOf(candidate)
                         showPair = false; previewFingerprint = ""; fingerprintConfirmed = false
                         message = "Securely connected by QR to ${candidate.name}"
                     }
@@ -310,7 +316,7 @@ class MainActivity : ComponentActivity() {
         }
     }
     private fun manualConnect() {
-        val input = manualIp.trim().removePrefix("http://")
+        val input = manualIp.trim().removePrefix("https://").removePrefix("http://")
         val parts = input.split(":")
         val port = if (parts.size == 2) parts[1].toIntOrNull() ?: -1 else 44888
         if (parts.size > 2 || !isPrivateIPv4(parts[0]) || port !in 1..65535) {
@@ -327,6 +333,10 @@ class MainActivity : ComponentActivity() {
         if (speed > 0) "$band  ·  ${speed} Mbps link" else band
     } catch (_: Exception) { "Band unavailable (enable Wi-Fi / location permission)" }
     private fun hotspot() {
+        if (Build.VERSION.SDK_INT < 33 && checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION), 479)
+            message = "Grant location permission for the local hotspot, then try again"; return
+        }
         if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.NEARBY_WIFI_DEVICES) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(arrayOf(Manifest.permission.NEARBY_WIFI_DEVICES), 480)
             message = "Grant nearby Wi-Fi permission, then start hotspot again"; return
@@ -365,133 +375,67 @@ class MainActivity : ComponentActivity() {
     }
 
     @Composable private fun NativeScreen() {
-        val bg = Color(0xFF101B2C)
-        val panel = Color(0xFF1D2C41)
-        val accent = Color(0xFFA6ECD9)
-        val muted = Color(0xFFB6C9D9)
-        val palette = darkColorScheme(primary = accent, onPrimary = Color(0xFF153B32), surface = panel, background = bg, onBackground = Color.White, onSurface = Color.White)
         val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris -> if (uris.isNotEmpty()) submitFiles(uris) }
-        val folderPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
-            if (uri != null) submitFolder(uri)
-        }
+        val folderPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri -> if (uri != null) submitFolder(uri) }
         val folderReceiverPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
             val entry = pendingFolderDownload
             pendingFolderDownload = null
             if (uri != null && entry != null) receiveFolder(entry, uri)
         }
         val writer = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
-            val item = pendingDownload
-            if (uri != null && item != null) download(item, uri)
+            val entry = pendingDownload
             pendingDownload = null
+            if (uri != null && entry != null) download(entry, uri)
         }
         LaunchedEffect(device?.address, token) {
-            while (true) {
-                delay(7000)
-                if (device != null && token != null && !busy) refresh()
-            }
+            while (true) { delay(7000); if (device != null && token != null && !busy) refresh() }
         }
-        if (showPair) AlertDialog(onDismissRequest = { showPair = false }, title = { Text("Verify Windows & pair") },
-            text = { Column {
-                Text("Compare this code with the secure identity displayed in Nerqo on Windows:")
-                Spacer(Modifier.height(10.dp))
-                Text(previewFingerprint.take(12).uppercase(), fontWeight = FontWeight.Bold, fontSize = 23.sp)
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Checkbox(checked = fingerprintConfirmed, onCheckedChange = { fingerprintConfirmed = it })
-                    Text("Identity code matches on both screens", fontSize = 12.sp)
-                }
-                Spacer(Modifier.height(8.dp))
-                OutlinedTextField(value = pinText, onValueChange = { pinText = it.filter(Char::isDigit).take(6) }, label = { Text("6-digit pairing code") }, singleLine = true)
-            } },
-            confirmButton = { Button(onClick = ::pair, enabled = !busy && fingerprintConfirmed && previewFingerprint.length == 64 && pinText.length == 6) { Text("Pair securely") } },
-            dismissButton = { TextButton(onClick = { showPair = false }) { Text("Cancel") } })
-        MaterialTheme(colorScheme = palette) {
-            Surface(modifier = Modifier.fillMaxSize(), color = bg) {
-                Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp)) {
+        NerqoTheme(darkMode) {
+            NerqoScreen(
+                deviceName = device?.name, connected = connected, paired = token != null,
+                nearby = nearby, entries = entries, busy = busy, progress = progress,
+                message = message, network = wifiText(), hotspotText = hotspotText,
+                shareText = shareText, manualIp = manualIp, darkMode = darkMode,
+                onShareText = { shareText = it }, onManualIp = { manualIp = it },
+                onTheme = { darkMode = it; prefs.edit().putBoolean("dark_mode", it).apply() },
+                onScanQr = ::scanPairQr, onDiscover = ::scan, onSelectDevice = ::select,
+                onManualConnect = ::manualConnect, onRefresh = ::refresh,
+                onFiles = { picker.launch(arrayOf("*/*")) }, onFolder = { folderPicker.launch(null) },
+                onSendText = ::sendText, onPaste = {
+                    val clipboard = getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                    shareText = clipboard.primaryClip?.getItemAt(0)?.coerceToText(this)?.toString() ?: ""
+                },
+                onEntry = { item ->
+                    when (item.kind) {
+                        "file" -> { pendingDownload = item; writer.launch(item.content) }
+                        "folder" -> { pendingFolderDownload = item; folderReceiverPicker.launch(null) }
+                        else -> {
+                            val clip = android.content.ClipData.newPlainText("Nerqo", item.content)
+                            (getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager).setPrimaryClip(clip)
+                            Toast.makeText(this, "Copied", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                }, onHotspot = ::hotspot,
+                onWifiSettings = { startActivity(Intent(Settings.ACTION_WIFI_SETTINGS)) },
+                onUpdates = { AppUpdater.check(this) }
+            )
+            if (showPair) androidx.compose.material3.AlertDialog(
+                onDismissRequest = { if (!busy) showPair = false },
+                title = { Text("Verify your computer") },
+                text = { Column {
+                    Text("Match this security identity with Nerqo on Windows before entering the pairing code.")
+                    Spacer(Modifier.height(16.dp))
+                    Text(previewFingerprint.take(12).uppercase(), fontWeight = FontWeight.Bold, fontSize = 24.sp, color = MaterialTheme.colorScheme.primary)
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Surface(color = accent, shape = RoundedCornerShape(12.dp)) { Text("↔", color = Color(0xFF153B32), fontSize = 27.sp, modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)) }
-                        Spacer(Modifier.width(12.dp))
-                        Column { Text("Nerqo.", fontSize = 28.sp, fontWeight = FontWeight.Bold); Text("Move freely. Stay local.", color = muted, fontSize = 12.sp) }
+                        Checkbox(checked = fingerprintConfirmed, onCheckedChange = { fingerprintConfirmed = it })
+                        Text("Identity matches on both devices", fontSize = 13.sp)
                     }
-                    Spacer(Modifier.height(26.dp))
-                    Text("OFFLINE NETWORK", color = accent, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                    Spacer(Modifier.height(8.dp))
-                    Text(wifiText(), fontSize = 19.sp, fontWeight = FontWeight.Bold)
-                    Text("For the highest speed, prefer a 5 GHz or 6 GHz connection. Your router/hotspot and both devices determine the band.", color = muted, fontSize = 12.sp)
-                    Spacer(Modifier.height(20.dp))
-                    Card(colors = CardDefaults.cardColors(containerColor = panel), shape = RoundedCornerShape(20.dp), modifier = Modifier.fillMaxWidth()) {
-                        Column(Modifier.padding(18.dp)) {
-                            Text(if (device == null || token == null) "Connect to your laptop" else "Connected to ${device?.name}", fontSize = 20.sp, fontWeight = FontWeight.Bold)
-                            Text(message, color = muted, fontSize = 13.sp, modifier = Modifier.padding(top = 7.dp, bottom = 14.dp))
-                            Button(onClick = ::scanPairQr, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("▣   Scan Windows pairing QR") }
-                            Spacer(Modifier.height(9.dp))
-                            OutlinedButton(onClick = ::scan, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("⌁   Find nearby Windows device") }
-                            for (found in nearby) {
-                                OutlinedButton(onClick = { select(found) }, modifier = Modifier.fillMaxWidth()) { Text("▣  ${found.name}  •  ${found.address}", maxLines = 1, overflow = TextOverflow.Ellipsis) }
-                            }
-                            Spacer(Modifier.height(10.dp))
-                            OutlinedTextField(value = manualIp, onValueChange = { manualIp = it }, label = { Text("Or enter local IP") }, placeholder = { Text("192.168.1.5") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
-                            TextButton(onClick = ::manualConnect) { Text("Connect with IP →") }
-                            if (device != null && token != null) OutlinedButton(onClick = ::refresh, enabled = !busy) { Text("↻  Refresh received items") }
-                        }
-                    }
-                    Spacer(Modifier.height(15.dp))
-                    Card(colors = CardDefaults.cardColors(containerColor = panel), shape = RoundedCornerShape(20.dp)) {
-                        Column(Modifier.fillMaxWidth().padding(18.dp)) {
-                            Text("Send to Windows", fontWeight = FontWeight.Bold, fontSize = 20.sp)
-                            Spacer(Modifier.height(8.dp))
-                            Button(onClick = { picker.launch(arrayOf("*/*")) }, modifier = Modifier.fillMaxWidth(), enabled = !busy && token != null) { Text("↑  Choose files") }
-                            Spacer(Modifier.height(8.dp))
-                            OutlinedButton(onClick = { folderPicker.launch(null) }, modifier = Modifier.fillMaxWidth(),
-                                enabled = !busy && token != null) { Text("↑  Send folder directly") }
-                            Text("Sends each file with resume; preserves subfolders without creating a ZIP.",
-                                color = muted, fontSize = 11.sp)
-                            Spacer(Modifier.height(10.dp))
-                            OutlinedTextField(value = shareText, onValueChange = { shareText = it }, label = { Text("Text or link") }, minLines = 2, modifier = Modifier.fillMaxWidth())
-                            Button(onClick = ::sendText, enabled = !busy && token != null && shareText.isNotBlank(), modifier = Modifier.fillMaxWidth()) { Text("Send text / link") }
-                            if (busy && progress > 0f) { Spacer(Modifier.height(9.dp)); LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth()) }
-                        }
-                    }
-                    Spacer(Modifier.height(15.dp))
-                    Card(colors = CardDefaults.cardColors(containerColor = panel), shape = RoundedCornerShape(20.dp)) {
-                        Column(Modifier.fillMaxWidth().padding(18.dp)) {
-                            Text("Shared with you", fontWeight = FontWeight.Bold, fontSize = 20.sp)
-                            Spacer(Modifier.height(8.dp))
-                            if (entries.isEmpty()) Text("Your transfers and links will appear here.", color = muted, fontSize = 13.sp)
-                            entries.sortedByDescending { it.id }.take(100).forEach { item ->
-                                HorizontalDivider(color = Color(0xFF42566B))
-                                Row(Modifier.fillMaxWidth().padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                                    Column(Modifier.weight(1f)) { Text(item.content, maxLines = 2, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.SemiBold); Text("${item.kind}  ·  ${item.sender}", color = muted, fontSize = 12.sp) }
-                                    TextButton(onClick = {
-                                        if (item.kind == "file") { pendingDownload = item; writer.launch(item.content) }
-                                        else if (item.kind == "folder") {
-                                            pendingFolderDownload = item
-                                            folderReceiverPicker.launch(null)
-                                        }
-                                        else { val clip = android.content.ClipData.newPlainText("Nerqo", item.content); (getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager).setPrimaryClip(clip); Toast.makeText(this@MainActivity, "Copied", Toast.LENGTH_SHORT).show() }
-                                    }) { Text(if (item.kind == "file") "Save" else if (item.kind == "folder") "Save folder" else "Copy") }
-                                }
-                            }
-                        }
-                    }
-                    Spacer(Modifier.height(15.dp))
-                    Card(colors = CardDefaults.cardColors(containerColor = panel), shape = RoundedCornerShape(20.dp)) {
-                        Column(Modifier.fillMaxWidth().padding(18.dp)) {
-                            Text("No router?", fontWeight = FontWeight.Bold, fontSize = 20.sp)
-                            Text("Create an offline local hotspot, then join it on Windows. On some phones choose 5 GHz in Android hotspot settings.", color = muted, fontSize = 12.sp, modifier = Modifier.padding(vertical = 8.dp))
-                            OutlinedButton(onClick = ::hotspot) { Text("Create offline hotspot") }
-                            if (hotspotText.isNotBlank()) Text(hotspotText, color = accent, fontSize = 13.sp)
-                        }
-                    }
-                    Spacer(Modifier.height(12.dp))
-                    TextButton(onClick = {
-                        // The updater selects a validated Internet network without
-                        // disrupting Nerqo's offline LAN connection.
-                        AppUpdater.check(this@MainActivity)
-                    }) { Text("Check Android updates ↗") }
-                    Text("v1.0.0  ·  Local secure transfers", color = muted, fontSize = 11.sp)
-                    Spacer(Modifier.height(20.dp))
-                }
-            }
+                    OutlinedTextField(value = pinText, onValueChange = { pinText = it.filter(Char::isDigit).take(6) }, label = { Text("6-digit pairing code") }, singleLine = true,
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.NumberPassword))
+                } },
+                confirmButton = { Button(onClick = ::pair, enabled = !busy && fingerprintConfirmed && previewFingerprint.length == 64 && pinText.length == 6) { Text("Pair securely") } },
+                dismissButton = { TextButton(onClick = { showPair = false }, enabled = !busy) { Text("Cancel") } }
+            )
         }
     }
 }

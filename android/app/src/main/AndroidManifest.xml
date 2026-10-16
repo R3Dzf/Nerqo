@@ -11,7 +11,7 @@
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <application android:allowBackup="false" android:usesCleartextTraffic="false"
         android:label="Nerqo" android:theme="@android:style/Theme.Material.NoActionBar"
-        android:icon="@drawable/ic_launcher" android:supportsRtl="true">
+        android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher" android:supportsRtl="true">
         <activity android:name=".MainActivity" android:launchMode="singleTop" android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
