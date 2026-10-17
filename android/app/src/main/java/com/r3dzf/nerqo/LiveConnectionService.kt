@@ -40,7 +40,7 @@ class LiveConnectionService : Service() {
     private var lastSeen: Set<String>? = null
     private var currentMessage = "Connecting to your computer..."
 
-    private fun onMain(action: () -> Unit) = ui.post(action)
+    private fun onMain(action: () -> Unit) { ui.post { action() } }
     override fun onBind(intent: Intent?) = null
 
     override fun onCreate() {
