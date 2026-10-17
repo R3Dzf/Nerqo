@@ -493,7 +493,7 @@ public sealed class LanHost : IAsyncDisposable
             {
                 // Always synchronize on subscribe, so reconnect never misses a
                 // change that happened while the phone was disconnected.
-                await ctx.Response.WriteAsync("event: changed\\ndata: " + Interlocked.Read(ref eventRevision) + "\\n\\n", ctx.RequestAborted);
+                await ctx.Response.WriteAsync("event: changed\ndata: " + Interlocked.Read(ref eventRevision) + "\n\n", ctx.RequestAborted);
                 await ctx.Response.Body.FlushAsync(ctx.RequestAborted);
                 while (!ctx.RequestAborted.IsCancellationRequested)
                 {
@@ -506,12 +506,12 @@ public sealed class LanHost : IAsyncDisposable
                         // A protocol heartbeat is not a data refresh. It allows
                         // intermediaries and clients to detect idle TCP failures.
                         if (Authorize(ctx) == null) break;
-                        await ctx.Response.WriteAsync(": keepalive\\n\\n", ctx.RequestAborted);
+                        await ctx.Response.WriteAsync(": keepalive\n\n", ctx.RequestAborted);
                         await ctx.Response.Body.FlushAsync(ctx.RequestAborted);
                         continue;
                     }
                     if (Authorize(ctx) == null) break;
-                    await ctx.Response.WriteAsync("event: changed\\ndata: " + revision + "\\n\\n", ctx.RequestAborted);
+                    await ctx.Response.WriteAsync("event: changed\ndata: " + revision + "\n\n", ctx.RequestAborted);
                     await ctx.Response.Body.FlushAsync(ctx.RequestAborted);
                 }
             }
