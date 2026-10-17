@@ -157,6 +157,49 @@ public sealed class LanHost : IAsyncDisposable
     public string ReceivedDirectory => Path.Combine(root, "Received");
     public string StorageDirectory => Path.Combine(root, "Storage");
     public event Action? Changed;
+    // Clipboard contents exist only in memory, are never added to transfers/history,
+    // and are accessible solely to authenticated, non-suspended peers over pinned TLS.
+    private long clipboardRevision;
+    private string clipboardText = "";
+    private string clipboardSource = "";
+    public bool ClipboardEnabled { get; private set; }
+    public event Action<string>? RemoteClipboard;
+    public void SetClipboardEnabled(bool enabled)
+    {
+        lock (gate)
+        {
+            ClipboardEnabled = enabled;
+            if (!enabled)
+            {
+                clipboardText = "";
+                clipboardSource = "";
+                clipboardRevision++;
+            }
+        }
+    }
+    public void PublishWindowsClipboard(string value) => PublishClipboard(value, "windows");
+    private long PublishClipboard(string value, string source)
+    {
+        if (string.IsNullOrEmpty(value) || Encoding.UTF8.GetByteCount(value) > 16 * 1024)
+            return Interlocked.Read(ref clipboardRevision);
+        bool updated;
+        long revision;
+        lock (gate)
+        {
+            if (!ClipboardEnabled) return clipboardRevision;
+            updated = !string.Equals(value, clipboardText, StringComparison.Ordinal);
+            if (updated)
+            {
+                clipboardText = value;
+                clipboardSource = source;
+                clipboardRevision++;
+            }
+            revision = clipboardRevision;
+        }
+        if (updated && source == "android") RemoteClipboard?.Invoke(value);
+        return revision;
+    }
+
     public List<TransferItem> Items { get { lock (gate) return state.Items.Concat(directShares.Values.Select(x => x.Item)).OrderByDescending(x => x.Created).Take(150).Select(x => x).ToList(); } }
     public List<PairedDevice> PairedDevices { get { lock (gate) return state.Peers.Where(x => x.Value.Expires > DateTimeOffset.UtcNow).Select(x => new PairedDevice(x.Key, x.Value.Name, x.Value.Expires, x.Value.Suspended)).OrderBy(x => x.Name).ToList(); } }
     public List<TransferHistoryEntry> History { get { lock (gate) return history.OrderByDescending(x => x.When).Take(500).ToList(); } }
@@ -397,6 +440,27 @@ public sealed class LanHost : IAsyncDisposable
             catch (JsonException) { if (!ctx.Response.HasStarted) { ctx.Response.StatusCode = 400; await ctx.Response.WriteAsJsonAsync(new { error = "Invalid JSON" }); } }
         });
         app.MapGet("/api/status", (HttpContext ctx) => Results.Json(new { name = Environment.MachineName, authorized = Authorize(ctx) != null, port = Port, version = "1.0.9", transferProtocol = 2, band = WifiInspector.GetBand() }));
+        app.MapGet("/api/clipboard", (HttpContext ctx) =>
+        {
+            if (Authorize(ctx) == null) return Unauthorized(ctx);
+            lock (gate)
+            {
+                return ClipboardEnabled
+                    ? Results.Json(new { revision = clipboardRevision, text = clipboardText, source = clipboardSource })
+                    : Results.Json(new { error = "Clipboard sync is disabled on Windows" }, statusCode: 409);
+            }
+        });
+        app.MapPost("/api/clipboard", async (HttpContext ctx) =>
+        {
+            if (Authorize(ctx) == null) return Unauthorized(ctx);
+            using var document = await ReadJson(ctx.Request, ctx.RequestAborted);
+            var value = Str(document.RootElement, "text");
+            if (string.IsNullOrEmpty(value) || Encoding.UTF8.GetByteCount(value) > 16 * 1024) return Results.BadRequest();
+            lock (gate) if (!ClipboardEnabled)
+                return Results.Json(new { error = "Clipboard sync is disabled on Windows" }, statusCode: 409);
+            var revision = PublishClipboard(value, "android");
+            return Results.Json(new { revision });
+        });
         app.MapPost("/api/pair", async (HttpContext ctx) =>
         {
             string ip = ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown";
