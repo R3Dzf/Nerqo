@@ -502,6 +502,17 @@ public partial class MainWindow : Window
     {
         string output = Path.GetFullPath("ui-smoke");
         Directory.CreateDirectory(output);
+        // Regression: the template must bind a read-only Percent property without
+        // creating an illegal TwoWay WPF binding (reported APPCRASH in v1.0.8).
+        displayedIncoming.Add(new LiveTransferRow(new LiveTransfer(
+            "binding-smoke", "In-progress transfer", "Receiving", "Running", 512, 1024, 0)));
+        EmptyIncomingLabel.Visibility = Visibility.Collapsed;
+        TransferNav.IsChecked = true;
+        await Dispatcher.InvokeAsync(() => { }, DispatcherPriority.ApplicationIdle);
+        IncomingList.UpdateLayout();
+        UpdateLayout();
+        File.WriteAllText(Path.Combine(output, "progress-binding-verification.txt"),
+            "PASS: a live transfer row with read-only Percent rendered successfully.\n");
         foreach (var nav in new[] { TransferNav, HistoryNav, DevicesNav, SettingsNav })
         {
             nav.IsChecked = true;
