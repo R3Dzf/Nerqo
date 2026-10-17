@@ -1,0 +1,29 @@
+name: Nerqo permanent signing readiness
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/signing-readiness.yml'
+      - '.github/workflows/release.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  check-signing-key:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check encrypted permanent Android signing secrets exist
+        env:
+          KEYSTORE: ${{ secrets.NERQO_KEYSTORE_BASE64 }}
+          STORE_PASS: ${{ secrets.NERQO_STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.NERQO_KEY_ALIAS }}
+          KEY_PASS: ${{ secrets.NERQO_KEY_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -n "$KEYSTORE" ] && [ -n "$STORE_PASS" ] && [ -n "$KEY_ALIAS" ] && [ -n "$KEY_PASS" ]; then
+            echo 'Permanent Android signing secrets: configured.'
+          else
+            echo 'RELEASE BLOCKED: permanent Android signing secrets are not all configured.'
+            echo 'Signing key must be the same as the v1.0.9 APK for Android in-place updates.'
+            exit 1
+          fi
