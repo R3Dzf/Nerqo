@@ -169,6 +169,8 @@ class MainActivity : ComponentActivity() {
     }
     private fun select(found: Device) {
         if (TransferRuntime.running) { message = "Pause the transfer before reconnecting"; return }
+        // Switching devices must close the previous background TLS session.
+        stopLiveConnection()
         sessionGeneration++
         device = found
         connected = false
