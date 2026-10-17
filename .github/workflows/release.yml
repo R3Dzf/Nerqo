@@ -160,7 +160,7 @@ jobs:
               --ks "$KEYSTORE_DIR/release.jks" --ks-key-alias "$NERQO_KEY_ALIAS" \
               --ks-pass env:NERQO_STORE_PASSWORD --key-pass env:NERQO_KEY_PASSWORD \
               --out "$APK" "$KEYSTORE_DIR/aligned.apk"
-            sha256sum "$APK" > "downloads/Nerqo-Android-v${VERSION}.apk.sha256"
+            (cd downloads && sha256sum "Nerqo-Android-v${VERSION}.apk" > "Nerqo-Android-v${VERSION}.apk.sha256")
           fi
           (cd downloads && sha256sum --check --status "Nerqo-Android-v${VERSION}.apk.sha256")
           ACTUAL=$("$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$APK" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | head -1 | tr '[:upper:]' '[:lower:]')
