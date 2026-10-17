@@ -34,7 +34,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -54,7 +53,6 @@ class MainActivity : ComponentActivity() {
     }
     private var pendingWifiQr: String? = null
     private var sessionGeneration = 0
-    private var polling = false
     private val executor = Executors.newSingleThreadExecutor()
     private var history: List<HistoryEntry>
         get() = TransferRuntime.history
@@ -236,43 +234,6 @@ class MainActivity : ComponentActivity() {
             }
             val fresh = NativeClient.list(current, saved)
             runOnUiThread { entries = fresh }
-        }
-    }
-    private fun refresh(silent: Boolean = false) {
-        val d = device ?: return
-        val access = token ?: return
-        if (busy || polling) return
-        val generation = sessionGeneration
-        polling = true
-        if (!silent) busy = true
-        executor.execute {
-            try {
-                bindLocalNetwork()
-                val fresh = NativeClient.list(d, access)
-                ReceiptOutbox.schedule(this)
-                runOnUiThread {
-                    if (generation == sessionGeneration && !isDestroyed) {
-                        connected = true
-                        if (entries != fresh) entries = fresh
-                        if (!silent) message = "Connected to ${d.name}"
-                    }
-                }
-            } catch (_: ConnectionPausedException) {
-                runOnUiThread { if (generation == sessionGeneration && !isDestroyed) { connected = false; entries = emptyList(); message = "Disconnected. Choose Reconnect to continue." } }
-            } catch (_: PairingExpiredException) {
-                prefs.edit().remove("token_${d.address}").apply()
-                runOnUiThread { if (generation == sessionGeneration && !isDestroyed) {
-                    connected = false; token = null; entries = emptyList(); showPair = false
-                    message = "Disconnected from Windows. Scan the pairing QR to reconnect."
-                } }
-            } catch (e: Exception) {
-                runOnUiThread { if (generation == sessionGeneration && !isDestroyed) {
-                    connected = false
-                    if (!silent) message = e.message ?: "Computer unavailable"
-                } }
-            } finally {
-                runOnUiThread { polling = false; if (!silent) busy = false }
-            }
         }
     }
     private fun disconnect() {
@@ -627,7 +588,8 @@ class MainActivity : ComponentActivity() {
                 deviceName = device?.name,
                 connected = if (token != null && LiveConnectionState.host == device?.address)
                     LiveConnectionState.online else connected,
-                paired = token != null, history = history,
+                paired = token != null && (if (LiveConnectionState.host == device?.address)
+                    LiveConnectionState.online else connected), history = history,
                 nearby = nearby, entries = if (token != null && LiveConnectionState.host == device?.address)
                     LiveConnectionState.items else entries, busy = busy, progress = progress,
                 message = if (TransferRuntime.message.isNotBlank()) TransferRuntime.message
@@ -640,7 +602,7 @@ class MainActivity : ComponentActivity() {
                 onShareText = { shareText = it }, onManualIp = { manualIp = it },
                 onTheme = { darkMode = it; prefs.edit().putBoolean("dark_mode", it).apply() },
                 onScanQr = ::scanPairQr, onDiscover = ::scan, onSelectDevice = ::select,
-                onManualConnect = ::manualConnect, onRefresh = { refresh() }, onDisconnect = ::disconnect, onReconnect = ::reconnect, onForget = ::forget, savedConnection = device != null,
+                onManualConnect = ::manualConnect, onDisconnect = ::disconnect, onReconnect = ::reconnect, onForget = ::forget, savedConnection = device != null,
                 onFiles = { picker.launch(arrayOf("*/*")) }, onFolder = { folderPicker.launch(null) },
                 onSendText = ::sendText, onPaste = {
                     val clipboard = getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager
