@@ -88,6 +88,22 @@ class MainActivity : ComponentActivity() {
     private var pendingDownload: SharedEntry? = null
     private var pendingFolderDownload: SharedEntry? = null
     private val prefs by lazy { getSharedPreferences("nerqo_native", MODE_PRIVATE) }
+    private fun startLiveConnection() {
+        val d = device ?: return
+        if (token == null || prefs.getBoolean("disconnected", false)) return
+        LiveConnectionState.host = d.address
+        try {
+            startForegroundService(Intent(this, LiveConnectionService::class.java).setAction("connect"))
+        } catch (error: Exception) {
+            message = "Live connection unavailable: " + (error.message ?: "Open Nerqo to reconnect")
+        }
+    }
+    private fun stopLiveConnection() {
+        stopService(Intent(this, LiveConnectionService::class.java))
+        LiveConnectionState.online = false
+        LiveConnectionState.items = emptyList()
+        LiveConnectionState.host = ""
+    }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         darkMode = prefs.getBoolean("dark_mode", false)
@@ -113,8 +129,8 @@ class MainActivity : ComponentActivity() {
         receiveShare(intent)
         setContent { NativeScreen() }
         if (prefs.getBoolean("disconnected", false)) token = null
-        if (device != null && token != null) refresh()
-        scan()
+        if (device != null && token != null) startLiveConnection()
+        else scan()
     }
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
@@ -187,7 +203,12 @@ class MainActivity : ComponentActivity() {
                 val fresh = try { if (access != null) NativeClient.list(found, access) else emptyList() }
                     catch (_: PairingExpiredException) { prefs.edit().remove("token_${found.address}").apply(); emptyList() }
                 val approvedToken = if (access != null && prefs.getString("token_${found.address}", null) == access) access else null
-                runOnUiThread { connected = approvedToken != null; token = approvedToken; entries = fresh; message = if (approvedToken == null) "Pair this device again" else "Verified secure Windows connection"; if (approvedToken == null) { previewFingerprint = discovered; showPair = true } }
+                runOnUiThread {
+                    connected = approvedToken != null; token = approvedToken; entries = fresh
+                    message = if (approvedToken == null) "Pair this device again" else "Verified secure Windows connection"
+                    if (approvedToken == null) { previewFingerprint = discovered; showPair = true }
+                    else startLiveConnection()
+                }
             } else {
                 runOnUiThread {
                     token = null
@@ -208,7 +229,11 @@ class MainActivity : ComponentActivity() {
             val saved = NativeClient.pair(current, pinText)
             prefs.edit().putString("cert_${current.address}:${current.port}", confirmedIdentity)
                 .putString("token_${current.address}", saved).putString("saved_identity", confirmedIdentity).putString("saved_token", saved).putBoolean("disconnected", false).apply()
-            runOnUiThread { connected = true; token = saved; showPair = false; pinText = ""; fingerprintConfirmed = false; message = "Securely paired with ${current.name}" }
+            runOnUiThread {
+                connected = true; token = saved; showPair = false; pinText = ""; fingerprintConfirmed = false
+                message = "Securely paired with ${current.name}"
+                startLiveConnection()
+            }
             val fresh = NativeClient.list(current, saved)
             runOnUiThread { entries = fresh }
         }
@@ -258,6 +283,7 @@ class MainActivity : ComponentActivity() {
         transferControl?.interrupt(TransferStop.PAUSE, closeAsync = true)
         connected = false; token = null; entries = emptyList(); showPair = false
         prefs.edit().putBoolean("disconnected", true).apply()
+        stopLiveConnection()
         message = "Disconnected. Any unfinished transfer is saved. Wi-Fi stays connected."
         executor.execute {
             // Best effort server suspension; local disconnect always succeeds, even offline.
@@ -287,7 +313,11 @@ class MainActivity : ComponentActivity() {
                 val moved = pendingTransfer?.copy(host = candidate.address, port = candidate.port)
                 moved?.save(this)
                 ReceiptOutbox.schedule(this)
-                runOnUiThread { pendingTransfer = moved; device = candidate; token = savedAccess; entries = fresh; connected = true; message = "Reconnected securely to ${candidate.name}" }
+                runOnUiThread {
+                    pendingTransfer = moved; device = candidate; token = savedAccess; entries = fresh; connected = true
+                    message = "Reconnected securely to ${candidate.name}"
+                    startLiveConnection()
+                }
                 return@task
             } catch (error: PairingExpiredException) {
                 runOnUiThread { device = candidate; token = null; connected = false; previewFingerprint = identity; showPair = true; message = "Pairing expired. Verify identity and pair again." }
@@ -311,6 +341,7 @@ class MainActivity : ComponentActivity() {
                 }
                 edit.apply()
                 token = null; connected = false; device = null; entries = emptyList()
+                stopLiveConnection()
                 if (old != null) executor.execute { runCatching { NativeClient.forget(current, old) } }
                 message = "Computer forgotten. Pair again to restore access."
             }.show()
@@ -513,6 +544,7 @@ class MainActivity : ComponentActivity() {
                         connected = true; device = candidate; token = newToken; entries = newEntries; nearby = listOf(candidate)
                         showPair = false; previewFingerprint = ""; fingerprintConfirmed = false
                         message = "Securely connected by QR to ${candidate.name}"
+                        startLiveConnection()
                     }
                     return@task
                 } catch (e: Exception) { lastFailure = e }
@@ -574,20 +606,34 @@ class MainActivity : ComponentActivity() {
             pendingDownload = null
             if (uri != null && entry != null) download(entry, uri)
         }
-        LaunchedEffect(device?.address, token) {
-            while (true) {
-                delay(7000)
-                // A refresh also owns the serial worker and disables Resume.
-                // Keep recovery controls available while a saved job exists.
-                if (device != null && token != null && !busy && pendingTransfer == null) refresh(silent = true)
+        // No timer-driven Refresh. The foreground service owns one TLS stream
+        // and delivers notifications immediately after each server change.
+        LaunchedEffect(LiveConnectionState.host) {
+            val newHost = LiveConnectionState.host
+            val current = device
+            if (newHost.isNotEmpty() && current != null && current.address != newHost &&
+                !prefs.getBoolean("disconnected", false)) {
+                val newPort = prefs.getInt("port", 44888)
+                val pinned = prefs.getString("cert_" + newHost + ":" + newPort, null)
+                if (pinned != null && pinned == prefs.getString("saved_identity", null)) {
+                    device = Device(prefs.getString("name", "Windows PC") ?: "Windows PC", newHost, newPort)
+                    token = prefs.getString("token_" + newHost, null)
+                }
             }
         }
         NerqoTheme(darkMode) {
             NerqoScreen(
                 onHistoryOpen = ::openHistory, onHistoryRetry = ::retryHistory, onHistoryClear = ::clearHistory,
-                deviceName = device?.name, connected = connected, paired = connected && token != null, history = history,
-                nearby = nearby, entries = entries, busy = busy, progress = progress,
-                message = if (TransferRuntime.message.isNotBlank()) TransferRuntime.message else message, network = wifiText(), hotspotText = hotspotText,
+                deviceName = device?.name,
+                connected = if (token != null && LiveConnectionState.host == device?.address)
+                    LiveConnectionState.online else connected,
+                paired = token != null, history = history,
+                nearby = nearby, entries = if (token != null && LiveConnectionState.host == device?.address)
+                    LiveConnectionState.items else entries, busy = busy, progress = progress,
+                message = if (TransferRuntime.message.isNotBlank()) TransferRuntime.message
+                    else if (token != null && LiveConnectionState.host == device?.address)
+                        LiveConnectionState.detail else message,
+                network = wifiText(), hotspotText = hotspotText,
                 transfer = transferUi, onPause = ::pauseTransfer,
                 onResume = { resumeTransfer() }, onCancel = ::cancelTransfer,
                 shareText = shareText, manualIp = manualIp, darkMode = darkMode,
