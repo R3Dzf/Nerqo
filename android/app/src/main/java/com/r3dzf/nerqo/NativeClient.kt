@@ -164,6 +164,10 @@ internal object NativeClient {
             return response(conn)
         } finally { close(conn) }
     }
+    fun clipboard(device: Device, token: String): JSONObject =
+        response(connect(device.endpoint + "/api/clipboard", "GET", token))
+    fun publishClipboard(device: Device, token: String, text: String): JSONObject =
+        postJson(device.endpoint, "/api/clipboard", JSONObject().put("text", text), token)
     fun status(device: Device): JSONObject = response(connect(device.endpoint + "/api/status", "GET"))
     fun pair(device: Device, pin: String): String = postJson(device.endpoint, "/api/pair", JSONObject()
         .put("pin", pin).put("name", android.os.Build.MODEL)).getString("token")
