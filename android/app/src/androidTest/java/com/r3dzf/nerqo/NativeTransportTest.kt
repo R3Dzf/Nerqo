@@ -39,6 +39,33 @@ class NativeTransportTest {
     private fun pauseAtFourMiB(control: TransferControl, done: Long) {
         if(done >= 4L * 1024 * 1024) control.interrupt(TransferStop.PAUSE)
     }
+    @Test fun test00LivePushUsesOnePinnedTlsConnection() {
+        val received = java.util.concurrent.CountDownLatch(2)
+        val socket = java.util.concurrent.atomic.AtomicReference<java.net.HttpURLConnection?>()
+        val error = java.util.concurrent.atomic.AtomicReference<Throwable?>()
+        val watcher = Thread {
+            try {
+                NativeClient.watchEvents(device, token, { socket.set(it) }) {
+                    // Every pushed event can fetch the real state without
+                    // creating another persistent subscription.
+                    if (NativeClient.list(device, token).isEmpty()) throw IOException("Missing share")
+                    received.countDown()
+                    if (received.count == 0L) socket.get()?.disconnect()
+                }
+            } catch (failure: Exception) {
+                if (received.count != 0L) error.set(failure)
+            }
+        }
+        watcher.start()
+        try {
+            assertTrue("Missing initial/next push from SSE fixture",
+                received.await(12, java.util.concurrent.TimeUnit.SECONDS))
+            assertNull(error.get())
+        } finally {
+            socket.get()?.disconnect()
+            watcher.join(3000)
+        }
+    }
     @Test fun test00HistorySurvivesReloadWithoutDuplicatingResumedJobs() {
         val job = TransferJob(kind = "downloadFile", title = "History persistence fixture", host = device.address,
             port = device.port, deviceName = device.name, fingerprint = "0".repeat(64))
