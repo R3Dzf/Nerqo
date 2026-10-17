@@ -3,6 +3,11 @@ param(
     [Parameter(Mandatory=$true)][string]$NewInstaller
 )
 $ErrorActionPreference = 'Stop'
+# The upgrade fixture intentionally overwrites application state. Refuse to run on a
+# person's workstation: this smoke test is valid only on a disposable CI runner.
+if ($env:GITHUB_ACTIONS -ne 'true') {
+    throw 'Upgrade smoke must run on an isolated GitHub Actions runner (it replaces test state).'
+}
 $installPath = Join-Path $env:LOCALAPPDATA 'Programs\Nerqo-Upgrade-Smoke'
 $dataRoot = Join-Path $env:LOCALAPPDATA 'Nerqo'
 $appPath = Join-Path $installPath 'Nerqo.exe'
@@ -38,6 +43,13 @@ function Stop-Nerqo {
     }
 }
 try {
+    # The prior host smoke can leave a resumable upload in local state. Nerqo
+    # v1.0.8 crashes when it renders that upload's read-only Percent property.
+    # Start with an empty test state; migration is tested using the fixture below.
+    $existingState = Join-Path $dataRoot 'state.json'
+    if (Test-Path -LiteralPath $existingState) {
+        Remove-Item -LiteralPath $existingState -Force
+    }
     Install-Nerqo $OldInstaller
     $old = Start-Nerqo
     if ($old.version -ne '1.0.8') { throw 'Wrong old application installed' }

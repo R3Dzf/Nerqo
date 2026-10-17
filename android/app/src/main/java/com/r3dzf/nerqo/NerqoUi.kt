@@ -70,6 +70,7 @@ private fun bytes(size: Long): String = when {
     transfer: TransferUi?, onPause: () -> Unit, onResume: () -> Unit, onCancel: () -> Unit,
     shareText: String, manualIp: String, darkMode: Boolean,
     onShareText: (String) -> Unit, onManualIp: (String) -> Unit, onTheme: (Boolean) -> Unit,
+    clipboardEnabled: Boolean, onClipboardEnabled: (Boolean) -> Unit,
     onScanQr: () -> Unit, onDiscover: () -> Unit, onSelectDevice: (Device) -> Unit,
     onManualConnect: () -> Unit, onRefresh: () -> Unit, onDisconnect: () -> Unit, onReconnect: () -> Unit, onForget: () -> Unit, savedConnection: Boolean, onFiles: () -> Unit, onFolder: () -> Unit,
     onSendText: () -> Unit, onPaste: () -> Unit, onEntry: (SharedEntry) -> Unit,
@@ -252,6 +253,15 @@ private fun bytes(size: Long): String = when {
                             Column(Modifier.weight(1f)) { Title("Appearance"); Caption("Use a softer dark palette.") }
                             Switch(checked = darkMode, onCheckedChange = onTheme, modifier = Modifier.padding(start = 8.dp).semantics { contentDescription = "Dark appearance" })
                         }
+                    } }
+                    item { Panel {
+                        Title("System clipboard sync")
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("Sync copied text", modifier = Modifier.weight(1f), fontWeight = FontWeight.Medium)
+                            Switch(checked = clipboardEnabled, onCheckedChange = onClipboardEnabled)
+                        }
+                        Caption("Text sync works over your trusted local connection. Android only detects clipboard changes automatically while Nerqo is in front. Other apps' clipboard content cannot be read silently in the background on modern Android.")
+                        Caption("Windows must also enable Clipboard Sync in its Settings. Avoid enabling this when you frequently copy passwords or one-time codes.")
                     } }
                     item { Panel {
                         Title("Your local network")

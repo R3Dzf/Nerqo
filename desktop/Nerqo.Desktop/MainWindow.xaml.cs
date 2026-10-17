@@ -26,6 +26,53 @@ public partial class MainWindow : Window
     private List<PairedDevice> displayedPeers = new();
     private readonly System.Collections.ObjectModel.ObservableCollection<LiveTransferRow> displayedIncoming = new();
     private bool exiting;
+    private bool clipboardSyncEnabled;
+    private bool clipboardBusy;
+    private string lastClipboard = "";
+    private readonly string clipboardSetting = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Nerqo", "clipboard-enabled.txt");
+    private readonly DispatcherTimer clipboardTimer = new() { Interval = TimeSpan.FromMilliseconds(750) };
+    private void ClipboardTick(object? sender, EventArgs e)
+    {
+        if (!clipboardSyncEnabled || clipboardBusy || !receiverStarted) return;
+        try
+        {
+            if (!Clipboard.ContainsText()) return;
+            string value = Clipboard.GetText();
+            if (string.IsNullOrEmpty(value) || System.Text.Encoding.UTF8.GetByteCount(value) > 16384 || value == lastClipboard) return;
+            lastClipboard = value;
+            service.PublishWindowsClipboard(value);
+        }
+        catch (System.Runtime.InteropServices.ExternalException) { /* Another application holds the clipboard; retry next tick. */ }
+        catch (System.Threading.ThreadStateException) { }
+    }
+    private void OnRemoteClipboard(string text) => Dispatcher.BeginInvoke(new Action(() =>
+    {
+        if (!clipboardSyncEnabled) return;
+        try
+        {
+            clipboardBusy = true;
+            lastClipboard = text;
+            Clipboard.SetText(text);
+        }
+        catch (System.Runtime.InteropServices.ExternalException) { /* Clipboard temporarily locked */ }
+        finally { clipboardBusy = false; }
+    }));
+    private void ChangeClipboardSync(object sender, RoutedEventArgs e)
+    {
+        if (ClipboardSyncToggle == null) return;
+        clipboardSyncEnabled = ClipboardSyncToggle.IsChecked == true;
+        service.SetClipboardEnabled(clipboardSyncEnabled);
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(clipboardSetting)!);
+            if (clipboardSyncEnabled) File.WriteAllText(clipboardSetting, "enabled");
+            else File.Delete(clipboardSetting);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        { FooterLabel.Text = "Clipboard preference could not be saved: " + ex.Message; }
+        try { lastClipboard = Clipboard.ContainsText() ? Clipboard.GetText() : ""; }
+        catch (System.Runtime.InteropServices.ExternalException) { lastClipboard = ""; }
+    }
     private bool preparing;
     private CancellationTokenSource? preparationCancellation;
     private void CancelPreparation(object s, RoutedEventArgs e) => preparationCancellation?.Cancel();
@@ -45,6 +92,15 @@ public partial class MainWindow : Window
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { DarkModeToggle.IsChecked = false; }
         ApplyTheme(false);
         loadingTheme = false;
+        service.RemoteClipboard += OnRemoteClipboard;
+        clipboardSyncEnabled = File.Exists(clipboardSetting);
+        ClipboardSyncToggle.IsChecked = clipboardSyncEnabled;
+        service.SetClipboardEnabled(clipboardSyncEnabled);
+        try { lastClipboard = Clipboard.ContainsText() ? Clipboard.GetText() : ""; }
+        catch (System.Runtime.InteropServices.ExternalException) { }
+        clipboardTimer.Tick += ClipboardTick;
+        clipboardTimer.Start();
+        Closed += (_, _) => clipboardTimer.Stop();
         PairCodeLabel.Text = service.PairCode;
         IdentityLabel.Text = service.PairingIdentity;
         service.Changed += () => Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(RefreshItems));
@@ -160,6 +216,7 @@ public partial class MainWindow : Window
     private async Task Quit()
     {
         exiting = true; tray?.Dispose(); tray = null;
+        clipboardTimer.Stop();
         await service.DisposeAsync(); Close();
     }
     private void RefreshItems()
@@ -445,6 +502,17 @@ public partial class MainWindow : Window
     {
         string output = Path.GetFullPath("ui-smoke");
         Directory.CreateDirectory(output);
+        // Regression: the template must bind a read-only Percent property without
+        // creating an illegal TwoWay WPF binding (reported APPCRASH in v1.0.8).
+        displayedIncoming.Add(new LiveTransferRow(new LiveTransfer(
+            "binding-smoke", "In-progress transfer", "Receiving", "Running", 512, 1024, 0)));
+        EmptyIncomingLabel.Visibility = Visibility.Collapsed;
+        TransferNav.IsChecked = true;
+        await Dispatcher.InvokeAsync(() => { }, DispatcherPriority.ApplicationIdle);
+        IncomingList.UpdateLayout();
+        UpdateLayout();
+        File.WriteAllText(Path.Combine(output, "progress-binding-verification.txt"),
+            "PASS: a live transfer row with read-only Percent rendered successfully.\n");
         foreach (var nav in new[] { TransferNav, HistoryNav, DevicesNav, SettingsNav })
         {
             nav.IsChecked = true;

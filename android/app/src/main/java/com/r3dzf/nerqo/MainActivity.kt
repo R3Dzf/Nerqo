@@ -59,6 +59,50 @@ class MainActivity : ComponentActivity() {
     private var history: List<HistoryEntry>
         get() = TransferRuntime.history
         set(value) { TransferRuntime.history = value }
+    private var clipboardEnabled by mutableStateOf(false)
+    private var clipboardListenerInstalled = false
+    private var clipboardForeground = false
+    private var clipboardLastText = ""
+    private var clipboardRemoteRevision = -1L
+    private var clipboardRequestBusy = false
+    private val clipManager by lazy { getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager }
+    private val clipListener = android.content.ClipboardManager.OnPrimaryClipChangedListener { onLocalClipboardChanged() }
+    private fun onLocalClipboardChanged() {
+        if (!clipboardEnabled || !clipboardForeground || clipboardRequestBusy) return
+        val value = try { clipManager.primaryClip?.getItemAt(0)?.coerceToText(this)?.toString() ?: "" }
+                    catch (_: Exception) { "" }
+        if (value.isEmpty() || value.toByteArray(Charsets.UTF_8).size > 16384 || value == clipboardLastText) return
+        clipboardLastText = value
+        val target = device ?: return
+        val access = token ?: return
+        // Do not hold the UI thread during TLS IO.
+        executor.execute {
+            runCatching { bindLocalNetwork(); NativeClient.publishClipboard(target, access, value) }
+        }
+    }
+    private fun updateClipboardSync(value: Boolean) {
+        clipboardEnabled = value
+        prefs.edit().putBoolean("clipboard_enabled", value).apply()
+        clipboardRemoteRevision = -1
+        clipboardLastText = try { clipManager.primaryClip?.getItemAt(0)?.coerceToText(this)?.toString() ?: "" }
+                            catch (_: Exception) { "" }
+    }
+    override fun onResume() {
+        super.onResume()
+        clipboardForeground = true
+        if (!clipboardListenerInstalled) {
+            clipManager.addPrimaryClipChangedListener(clipListener)
+            clipboardListenerInstalled = true
+        }
+    }
+    override fun onPause() {
+        clipboardForeground = false
+        if (clipboardListenerInstalled) {
+            clipManager.removePrimaryClipChangedListener(clipListener)
+            clipboardListenerInstalled = false
+        }
+        super.onPause()
+    }
     private var connected by mutableStateOf(false)
     private var darkMode by mutableStateOf(false)
     private var device by mutableStateOf<Device?>(null)
@@ -91,6 +135,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         darkMode = prefs.getBoolean("dark_mode", false)
+        clipboardEnabled = prefs.getBoolean("clipboard_enabled", false)
         history = TransferHistory.load(this)
         TransferRuntime.restore(this)
         pendingTransfer?.takeIf { !TransferRuntime.running }?.let {
@@ -552,6 +597,10 @@ class MainActivity : ComponentActivity() {
     }
     override fun onDestroy() {
         pendingWifiQr = null
+        if (clipboardListenerInstalled) {
+            clipManager.removePrimaryClipChangedListener(clipListener)
+            clipboardListenerInstalled = false
+        }
         executor.shutdownNow()
         super.onDestroy()
     }
@@ -576,7 +625,32 @@ class MainActivity : ComponentActivity() {
         }
         LaunchedEffect(device?.address, token) {
             while (true) {
-                delay(7000)
+                delay(2500)
+                val local = device
+                val auth = token
+                if (clipboardEnabled && local != null && auth != null && !clipboardRequestBusy) {
+                    clipboardRequestBusy = true
+                    executor.execute {
+                        try {
+                            bindLocalNetwork()
+                            val snapshot = NativeClient.clipboard(local, auth)
+                            val revision = snapshot.optLong("revision", -1)
+                            val source = snapshot.optString("source")
+                            val text = snapshot.optString("text")
+                            if (source == "windows" && revision > clipboardRemoteRevision && clipboardRemoteRevision >= 0 &&
+                                text.isNotEmpty() && text.toByteArray(Charsets.UTF_8).size <= 16384) {
+                                runOnUiThread {
+                                    if (clipboardEnabled && clipboardForeground && device == local && token == auth) {
+                                        clipboardLastText = text
+                                        clipManager.setPrimaryClip(android.content.ClipData.newPlainText("Nerqo", text))
+                                    }
+                                }
+                            }
+                            clipboardRemoteRevision = revision
+                        } catch (_: Exception) { /* Disconnected or clipboard disabled by host. */ }
+                        finally { clipboardRequestBusy = false }
+                    }
+                }
                 // A refresh also owns the serial worker and disables Resume.
                 // Keep recovery controls available while a saved job exists.
                 if (device != null && token != null && !busy && pendingTransfer == null) refresh(silent = true)
@@ -593,6 +667,7 @@ class MainActivity : ComponentActivity() {
                 shareText = shareText, manualIp = manualIp, darkMode = darkMode,
                 onShareText = { shareText = it }, onManualIp = { manualIp = it },
                 onTheme = { darkMode = it; prefs.edit().putBoolean("dark_mode", it).apply() },
+                clipboardEnabled = clipboardEnabled, onClipboardEnabled = ::updateClipboardSync,
                 onScanQr = ::scanPairQr, onDiscover = ::scan, onSelectDevice = ::select,
                 onManualConnect = ::manualConnect, onRefresh = { refresh() }, onDisconnect = ::disconnect, onReconnect = ::reconnect, onForget = ::forget, savedConnection = device != null,
                 onFiles = { picker.launch(arrayOf("*/*")) }, onFolder = { folderPicker.launch(null) },

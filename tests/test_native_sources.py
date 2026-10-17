@@ -14,6 +14,19 @@ class NativeSources(unittest.TestCase):
         self.assertNotIn('WebView',code)
         self.assertNotIn('webbrowser.open',code)
         ET.parse(ROOT/'desktop/Nerqo.Desktop/MainWindow.xaml')
+    def test_transfer_progress_binding_is_read_only(self):
+        # WPF RangeBase.Value defaults to a TwoWay binding; read-only Percent
+        # previously killed Nerqo 1.0.8 during transfer queue rendering.
+        document = ET.parse(ROOT/'desktop/Nerqo.Desktop/MainWindow.xaml')
+        progress = [
+            node.attrib.get('Value', '')
+            for node in document.iter()
+            if node.tag.endswith('ProgressBar') and 'Percent' in node.attrib.get('Value', '')
+        ]
+        self.assertEqual(progress, ['{Binding Percent, Mode=OneWay}'])
+        self.assertIn('progress-binding-verification.txt',
+                      (ROOT/'desktop/Nerqo.Desktop/MainWindow.xaml.cs').read_text())
+
     def test_android_is_compose_not_webview(self):
         src=(ROOT/'android/app/src/main/java/com/r3dzf/nerqo/MainActivity.kt').read_text()
         self.assertIn('setContent',src)
