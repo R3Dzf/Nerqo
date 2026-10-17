@@ -53,12 +53,12 @@ class Handler(BaseHTTPRequestHandler):
                 # Android test verifies an initial snapshot and a second push
                 # using the *same* authenticated long-lived TLS connection.
                 for rev in (1, 2):
-                    self.wfile.write(('event: changed\\ndata: ' + str(rev) + '\\n\\n').encode('ascii'))
+                    self.wfile.write(('event: changed\ndata: ' + str(rev) + '\n\n').encode('ascii'))
                     self.wfile.flush()
                     time.sleep(.25)
                 while True:
                     time.sleep(5)
-                    self.wfile.write(b': keepalive\\n\\n')
+                    self.wfile.write(b': keepalive\n\n')
                     self.wfile.flush()
             except (OSError, ssl.SSLError, ConnectionError):
                 pass
