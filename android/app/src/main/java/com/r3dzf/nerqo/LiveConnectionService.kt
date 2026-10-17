@@ -164,6 +164,8 @@ class LiveConnectionService : Service() {
                 NativeClient.watchEvents(device, token, { connection ->
                     stream = connection
                 }) {
+                    if (!running || prefs.getBoolean("disconnected", false) ||
+                        prefs.getString("host", "") != device.address) return@watchEvents
                     // Subscribe first, fetch a complete snapshot on connect and
                     // after every event: reconnects cannot silently miss shares.
                     val latest = NativeClient.list(device, token)
@@ -173,6 +175,8 @@ class LiveConnectionService : Service() {
                     failures = 0
                     retryMs = 1000L
                     onMain {
+                        if (!running || prefs.getBoolean("disconnected", false) ||
+                            prefs.getString("host", "") != device.address) return@onMain
                         LiveConnectionState.host = device.address
                         LiveConnectionState.items = latest
                         LiveConnectionState.online = true
