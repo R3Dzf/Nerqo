@@ -44,6 +44,14 @@ def tap(label, attr='text'):
         except (subprocess.CalledProcessError, ET.ParseError):
             time.sleep(2)
             continue
+        # Emulator instrumentation can leave the notification shade expanded,
+        # covering every Compose button. Collapse only a detected shade; do not
+        # dismiss application errors, permission prompts or Nerqo dialogs.
+        if any(n.get('text') == 'Clear all' and n.get('package') == 'com.android.systemui'
+               for n in tree.iter('node')):
+            adb('shell', 'cmd', 'statusbar', 'collapse')
+            time.sleep(1)
+            continue
         # A known disposable-emulator launcher ANR can cover the target app.
         # Recover that exact external package once. Never dismiss a Nerqo ANR.
         labels = [n.get('text', '') for n in tree.iter('node')]
@@ -96,6 +104,7 @@ def resume(must_be_active=False):
 
 adb('shell', 'input', 'keyevent', 'KEYCODE_WAKEUP')
 adb('shell', 'wm', 'dismiss-keyguard')
+adb('shell', 'cmd', 'statusbar', 'collapse')
 # Instrumentation owns the target process. Relaunch from a stopped process so
 # the UI recovery check also verifies loading the persisted transfer job.
 adb('shell', 'am', 'force-stop', 'com.r3dzf.nerqo')
