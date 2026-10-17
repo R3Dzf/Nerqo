@@ -13,10 +13,10 @@ jobs:
     steps:
       - name: Check encrypted permanent Android signing secrets exist
         env:
-          KEYSTORE: ${{ secrets.NERQO_KEYSTORE_BASE64 }}
-          STORE_PASS: ${{ secrets.NERQO_STORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.NERQO_KEY_ALIAS }}
-          KEY_PASS: ${{ secrets.NERQO_KEY_PASSWORD }}
+          KEYSTORE: ${{ secrets.NERQO_ANDROID_KEYSTORE_BASE64 }}
+          STORE_PASS: ${{ secrets.NERQO_ANDROID_STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.NERQO_ANDROID_KEY_ALIAS }}
+          KEY_PASS: ${{ secrets.NERQO_ANDROID_KEY_PASSWORD }}
         shell: bash
         run: |
           set -euo pipefail
