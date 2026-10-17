@@ -4,6 +4,9 @@ import android.app.*
 import android.content.*
 import android.content.pm.ServiceInfo
 import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
 import android.os.*
 import androidx.compose.runtime.*
 import java.io.IOException
@@ -38,6 +41,7 @@ class LiveConnectionService : Service() {
     @Volatile private var running = true
     @Volatile private var stream: HttpURLConnection? = null
     private var lastSeen: Set<String>? = null
+    private var networkCallback: ConnectivityManager.NetworkCallback? = null
     private var currentMessage = "Connecting to your computer..."
 
     private fun onMain(action: () -> Unit) { ui.post { action() } }
@@ -47,6 +51,18 @@ class LiveConnectionService : Service() {
         super.onCreate()
         getSystemService(NotificationManager::class.java).createNotificationChannel(
             NotificationChannel("connection", "Continuous device connection", NotificationManager.IMPORTANCE_LOW))
+        // Wake the blocking SSE reader immediately when the Wi-Fi link is
+        // replaced. Otherwise a dead TCP socket can take 65s to time out.
+        val cm = getSystemService(ConnectivityManager::class.java)
+        val callback = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) { stream?.disconnect() }
+            override fun onLost(network: Network) { stream?.disconnect() }
+        }
+        try {
+            cm.registerNetworkCallback(NetworkRequest.Builder()
+                .addTransportType(NetworkCapabilities.TRANSPORT_WIFI).build(), callback)
+            networkCallback = callback
+        } catch (_: Exception) { /* Socket timeout/backoff remains the fallback. */ }
     }
 
     private fun notification(detail: String): Notification {
@@ -212,6 +228,10 @@ class LiveConnectionService : Service() {
 
     override fun onDestroy() {
         running = false
+        networkCallback?.let { callback ->
+            runCatching { getSystemService(ConnectivityManager::class.java).unregisterNetworkCallback(callback) }
+        }
+        networkCallback = null
         stream?.disconnect()
         worker.shutdownNow()
         onMain { LiveConnectionState.online = false }
