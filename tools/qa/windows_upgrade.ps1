@@ -3,6 +3,8 @@ param(
     [Parameter(Mandatory=$true)][string]$NewInstaller
 )
 $ErrorActionPreference = 'Stop'
+# This validation overwrites test state and is only safe on disposable runners.
+if ($env:GITHUB_ACTIONS -ne 'true') { throw 'Run the upgrade smoke only on disposable GitHub Actions machines.' }
 $installPath = Join-Path $env:LOCALAPPDATA 'Programs\Nerqo-Upgrade-Smoke'
 $dataRoot = Join-Path $env:LOCALAPPDATA 'Nerqo'
 $appPath = Join-Path $installPath 'Nerqo.exe'
@@ -38,6 +40,12 @@ function Stop-Nerqo {
     }
 }
 try {
+    # Host smoke can leave a partially received transfer. Old v1.0.8 has a
+    # read-only progress binding crash when rendering that transfer.
+    $existingState = Join-Path $dataRoot 'state.json'
+    if (Test-Path -LiteralPath $existingState) {
+        Move-Item -LiteralPath $existingState -Destination (Join-Path $env:TEMP 'nerqo-upgrade-prior-state.json') -Force
+    }
     Install-Nerqo $OldInstaller
     $old = Start-Nerqo
     if ($old.version -ne '1.0.8') { throw 'Wrong old application installed' }
