@@ -1,0 +1,93 @@
+name: Promote verified Nerqo 1.0.9 Stable
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/promote-verified-v1.0.9.yml'
+  workflow_dispatch:
+permissions:
+  contents: write
+  actions: read
+concurrency:
+  group: nerqo-verified-1-0-9-promotion
+  cancel-in-progress: false
+jobs:
+  verified-promotion:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Verify the Windows candidate exactly matches main code
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE=99c2803bb8a7f1fdd37a469758b30065888d3215
+          SOURCE=3a6174af05d71f7ccba381a366bbf205e6754d49
+          SOURCE_TREE=$(gh api "repos/$GITHUB_REPOSITORY/git/commits/$SOURCE" --jq '.tree.sha')
+          BASE_TREE=$(git rev-parse "$BASE^{tree}")
+          test "$SOURCE_TREE" = "$BASE_TREE"
+          git diff --quiet "$BASE" HEAD -- desktop android installer nerqo tools tests assets web app.py downloads .github/workflows/release.yml .github/workflows/native-preview.yml .github/workflows/native-ui.yml
+          test "$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/39066017689" --jq .conclusion)" = success
+          test -f downloads/Nerqo-Android-v1.0.9.apk.sha256
+          test -f docs/releases/v1.0.9.md
+          echo 'Verified: application source matches the Windows candidate that passed upgrade tests'
+      - name: Download previously verified Windows and signed Android artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p staging/windows staging/android
+          gh run download 39066017689 --repo "$GITHUB_REPOSITORY" --name Nerqo-Native-Windows-Setup-Preview --dir staging/windows
+          gh run download 39066310990 --repo "$GITHUB_REPOSITORY" --name stable-android-signed --dir staging/android
+          test -s staging/windows/Nerqo-Windows-Setup.exe
+          test -s staging/android/Nerqo-Android.apk
+          EXPECTED=$(cut -d ' ' -f1 downloads/Nerqo-Android-v1.0.9.apk.sha256)
+          ACTUAL=$(sha256sum staging/android/Nerqo-Android.apk | cut -d ' ' -f1)
+          test "$EXPECTED" = "$ACTUAL"
+          echo 'Verified: signed Android APK matches repository SHA-256 and previously passed signing verification'
+      - name: Assemble compatible full installers and delta packages
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release view v1.0.9 >/dev/null 2>&1; then
+            echo 'v1.0.9 already exists; promotion not needed'
+            exit 0
+          fi
+          mkdir -p staging/release staging/previous
+          PREV=$(gh release list --json tagName --limit 1 --jq '.[0].tagName' || true)
+          OLDARGS=()
+          if [[ "$PREV" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            gh release download "$PREV" --pattern 'Nerqo-Windows-Setup.exe' --dir staging/previous || true
+            gh release download "$PREV" --pattern 'Nerqo-Android.apk' --dir staging/previous || true
+            OLDARGS+=(--old-version "${PREV#v}")
+            if [ -f staging/previous/Nerqo-Windows-Setup.exe ]; then OLDARGS+=(--old-windows staging/previous/Nerqo-Windows-Setup.exe); fi
+            if [ -f staging/previous/Nerqo-Android.apk ]; then OLDARGS+=(--old-android staging/previous/Nerqo-Android.apk); fi
+          fi
+          python tools/build_native_release.py --version 1.0.9 --windows staging/windows/Nerqo-Windows-Setup.exe --android staging/android/Nerqo-Android.apk --output staging/release "${OLDARGS[@]}"
+          (cd staging/release && sha256sum Nerqo-* update-manifest.json > SHA256SUMS.txt)
+      - name: Publish stable v1.0.9 (never overwrite)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release view v1.0.9 >/dev/null 2>&1; then
+            echo 'Existing release detected; nothing overwritten'
+            exit 0
+          fi
+          test -s staging/release/Nerqo-Windows-Setup.exe
+          test -s staging/release/Nerqo-Android.apk
+          test -s staging/release/update-manifest.json
+          gh release create v1.0.9 staging/release/* --target 99c2803bb8a7f1fdd37a469758b30065888d3215 --title 'Nerqo v1.0.9 Stable' --notes-file docs/releases/v1.0.9.md --latest
+          gh release view v1.0.9 --json tagName,assets
