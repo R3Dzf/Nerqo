@@ -129,10 +129,10 @@ jobs:
           # Sign with the established private Android key if this repository's
           # encrypted release secrets are configured. Never publish or rotate
           # the signing key, or silently replace it with a debug certificate.
-          NERQO_KEYSTORE_BASE64: ${{ secrets.NERQO_KEYSTORE_BASE64 }}
-          NERQO_STORE_PASSWORD: ${{ secrets.NERQO_STORE_PASSWORD }}
-          NERQO_KEY_ALIAS: ${{ secrets.NERQO_KEY_ALIAS }}
-          NERQO_KEY_PASSWORD: ${{ secrets.NERQO_KEY_PASSWORD }}
+          NERQO_ANDROID_KEYSTORE_BASE64: ${{ secrets.NERQO_ANDROID_KEYSTORE_BASE64 }}
+          NERQO_ANDROID_STORE_PASSWORD: ${{ secrets.NERQO_ANDROID_STORE_PASSWORD }}
+          NERQO_ANDROID_KEY_ALIAS: ${{ secrets.NERQO_ANDROID_KEY_ALIAS }}
+          NERQO_ANDROID_KEY_PASSWORD: ${{ secrets.NERQO_ANDROID_KEY_PASSWORD }}
         shell: bash
         run: |
           set -euo pipefail
@@ -144,21 +144,21 @@ jobs:
           fi
           test -f "$UNSIGNED"
           if [ ! -f "$APK" ]; then
-            if [ -z "$NERQO_KEYSTORE_BASE64" ] || [ -z "$NERQO_STORE_PASSWORD" ] || [ -z "$NERQO_KEY_ALIAS" ] || [ -z "$NERQO_KEY_PASSWORD" ]; then
+            if [ -z "$NERQO_ANDROID_KEYSTORE_BASE64" ] || [ -z "$NERQO_ANDROID_STORE_PASSWORD" ] || [ -z "$NERQO_ANDROID_KEY_ALIAS" ] || [ -z "$NERQO_ANDROID_KEY_PASSWORD" ]; then
               echo 'BLOCKED: stable APK for this version is not pre-signed and permanent-key release secrets are not configured.'
-              echo 'Set NERQO_KEYSTORE_BASE64, NERQO_STORE_PASSWORD, NERQO_KEY_ALIAS, and NERQO_KEY_PASSWORD in encrypted GitHub Actions secrets.'
+              echo 'Set NERQO_ANDROID_KEYSTORE_BASE64, NERQO_ANDROID_STORE_PASSWORD, NERQO_ANDROID_KEY_ALIAS, and NERQO_ANDROID_KEY_PASSWORD in encrypted GitHub Actions secrets.'
               echo 'The original Android release keystore is REQUIRED for an in-place update. No key will be generated or published.'
               exit 1
             fi
             mkdir -p downloads
             KEYSTORE_DIR=$(mktemp -d)
             trap 'rm -rf "$KEYSTORE_DIR"' EXIT
-            printf '%s' "$NERQO_KEYSTORE_BASE64" | base64 -d > "$KEYSTORE_DIR/release.jks"
+            printf '%s' "$NERQO_ANDROID_KEYSTORE_BASE64" | base64 -d > "$KEYSTORE_DIR/release.jks"
             chmod 600 "$KEYSTORE_DIR/release.jks"
             "$ANDROID_HOME/build-tools/36.0.0/zipalign" -f -p 4 "$UNSIGNED" "$KEYSTORE_DIR/aligned.apk"
             "$ANDROID_HOME/build-tools/36.0.0/apksigner" sign \
-              --ks "$KEYSTORE_DIR/release.jks" --ks-key-alias "$NERQO_KEY_ALIAS" \
-              --ks-pass env:NERQO_STORE_PASSWORD --key-pass env:NERQO_KEY_PASSWORD \
+              --ks "$KEYSTORE_DIR/release.jks" --ks-key-alias "$NERQO_ANDROID_KEY_ALIAS" \
+              --ks-pass env:NERQO_ANDROID_STORE_PASSWORD --key-pass env:NERQO_ANDROID_KEY_PASSWORD \
               --out "$APK" "$KEYSTORE_DIR/aligned.apk"
             (cd downloads && sha256sum "Nerqo-Android-v${VERSION}.apk" > "Nerqo-Android-v${VERSION}.apk.sha256")
           fi
