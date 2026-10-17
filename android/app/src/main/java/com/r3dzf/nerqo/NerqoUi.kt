@@ -166,7 +166,6 @@ private fun bytes(size: Long): String = when {
                     } }
                     item { Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         Text("Available shares", fontSize = 22.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-                        TextButton(onClick = onRefresh, enabled = !busy && paired) { Text("Refresh") }
                     } }
                     if (entries.isEmpty()) item { Panel { Symbol(R.drawable.ic_transfer); Title("Nothing shared yet"); Caption("Your files and notes will appear here. Send a little something to get started.") } }
                     // The API already returns newest first. UUID order is not chronological.
