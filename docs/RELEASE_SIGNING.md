@@ -8,10 +8,10 @@ The owner must configure these four encrypted **repository Actions secrets** in 
 
 | Secret | Value |
 |---|---|
-| `NERQO_KEYSTORE_BASE64` | The **Base64 encoding** of the original, private release keystore file (NOT the public certificate or APK). |
-| `NERQO_STORE_PASSWORD` | Password for that keystore. |
-| `NERQO_KEY_ALIAS` | Alias of the permanent signing key within it. |
-| `NERQO_KEY_PASSWORD` | Password for that alias/key. |
+| `NERQO_ANDROID_KEYSTORE_BASE64` | The **Base64 encoding** of the original, private release keystore file (NOT the public certificate or APK). |
+| `NERQO_ANDROID_STORE_PASSWORD` | Password for that keystore. |
+| `NERQO_ANDROID_KEY_ALIAS` | Alias of the permanent signing key within it. |
+| `NERQO_ANDROID_KEY_PASSWORD` | Password for that alias/key. |
 
 To encode the *existing private keystore file* locally in PowerShell:
 
