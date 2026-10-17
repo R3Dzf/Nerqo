@@ -82,7 +82,7 @@ try {
     $installedDetails = Get-ItemProperty $installedEntry[0].PSPath
     if ($installedDetails.DisplayVersion -ne '1.0.10') { throw 'Old installed-app version remains registered' }
     $current = Start-Nerqo
-    if ($current.version -ne '1.0.10') { throw 'Installed app did not upgrade to 1.0.9' }
+    if ($current.version -ne '1.0.10') { throw 'Installed app did not upgrade to 1.0.10' }
     $cachedInstaller = Join-Path $dataRoot 'Updates\Nerqo-Windows-Setup-1.0.10.exe'
     if (-not (Test-Path $cachedInstaller) -or (Get-FileHash $cachedInstaller).Hash -ne (Get-FileHash $NewInstaller).Hash) {
         throw 'Current installer was not cached byte-for-byte for the next delta update'
