@@ -445,6 +445,15 @@ public partial class MainWindow : Window
     {
         string output = Path.GetFullPath("ui-smoke");
         Directory.CreateDirectory(output);
+        // Regression: render an in-progress row with a read-only Percent property.
+        displayedIncoming.Add(new LiveTransferRow(new LiveTransfer(
+            "binding-smoke", "In-progress transfer", "Receiving", "Running", 512, 1024, 0)));
+        EmptyIncomingLabel.Visibility = Visibility.Collapsed;
+        TransferNav.IsChecked = true;
+        IncomingList.UpdateLayout();
+        UpdateLayout();
+        File.WriteAllText(Path.Combine(output, "progress-binding-verification.txt"),
+            "PASS: live transfer row with read-only Percent rendered successfully.\n");
         foreach (var nav in new[] { TransferNav, HistoryNav, DevicesNav, SettingsNav })
         {
             nav.IsChecked = true;
