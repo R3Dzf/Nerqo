@@ -22,6 +22,36 @@ class NativeSources(unittest.TestCase):
         self.assertIn('progress-binding-verification.txt',
                       (ROOT/'desktop/Nerqo.Desktop/MainWindow.xaml.cs').read_text())
 
+    def test_live_connection_is_event_driven_not_seven_second_polling(self):
+        desktop=(ROOT/'desktop/Nerqo.Desktop/MainWindow.xaml.cs').read_text()
+        server=(ROOT/'desktop/Nerqo.Desktop/Services/LanHost.cs').read_text()
+        client=(ROOT/'android/app/src/main/java/com/r3dzf/nerqo/NativeClient.kt').read_text()
+        activity=(ROOT/'android/app/src/main/java/com/r3dzf/nerqo/MainActivity.kt').read_text()
+        service=(ROOT/'android/app/src/main/java/com/r3dzf/nerqo/LiveConnectionService.kt').read_text()
+        manifest=(ROOT/'android/app/src/main/AndroidManifest.xml').read_text()
+        self.assertNotIn('TimeSpan.FromMilliseconds(500)', desktop)
+        self.assertIn('service.Changed += RefreshFromEvent', desktop)
+        self.assertIn('"/api/events"', server)
+        self.assertIn('text/event-stream', server)
+        self.assertIn('Channel.CreateBounded', server)
+        self.assertIn('"/api/events"', client)
+        self.assertIn('NativeClient.watchEvents(', service)
+        self.assertIn('LiveConnectionState.items', activity)
+        self.assertNotIn('delay(7000)', activity)
+        self.assertNotIn('private fun refresh(silent', activity)
+        self.assertIn('FOREGROUND_SERVICE_CONNECTED_DEVICE', manifest)
+        self.assertIn('android:foregroundServiceType="connectedDevice"', manifest)
+
+    def test_dark_history_dropdown_uses_themed_popup(self):
+        palette=(ROOT/'desktop/Nerqo.Desktop/App.xaml').read_text()
+        window=(ROOT/'desktop/Nerqo.Desktop/MainWindow.xaml').read_text()
+        ET.parse(ROOT/'desktop/Nerqo.Desktop/App.xaml')
+        ET.parse(ROOT/'desktop/Nerqo.Desktop/MainWindow.xaml')
+        self.assertIn('x:Key="HistoryFilterStyle"',palette)
+        self.assertIn('x:Key="HistoryFilterItem"',palette)
+        self.assertIn('Background="{DynamicResource Panel}"',palette)
+        self.assertIn('Style="{StaticResource HistoryFilterStyle}"',window)
+
     def test_android_is_compose_not_webview(self):
         src=(ROOT/'android/app/src/main/java/com/r3dzf/nerqo/MainActivity.kt').read_text()
         self.assertIn('setContent',src)
