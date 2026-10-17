@@ -26,6 +26,16 @@ public partial class MainWindow : Window
     private List<PairedDevice> displayedPeers = new();
     private readonly System.Collections.ObjectModel.ObservableCollection<LiveTransferRow> displayedIncoming = new();
     private bool exiting;
+    private int refreshQueued;
+    private void RefreshFromEvent()
+    {
+        if (Dispatcher.HasShutdownStarted || Interlocked.Exchange(ref refreshQueued, 1) != 0) return;
+        Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() =>
+        {
+            Interlocked.Exchange(ref refreshQueued, 0);
+            if (!exiting) RefreshItems();
+        }));
+    }
     private bool preparing;
     private CancellationTokenSource? preparationCancellation;
     private void CancelPreparation(object s, RoutedEventArgs e) => preparationCancellation?.Cancel();
@@ -47,10 +57,9 @@ public partial class MainWindow : Window
         loadingTheme = false;
         PairCodeLabel.Text = service.PairCode;
         IdentityLabel.Text = service.PairingIdentity;
-        service.Changed += () => Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(RefreshItems));
-        var transferTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
-        transferTimer.Tick += (_, _) => RefreshItems(); transferTimer.Start();
-        Closed += (_, _) => transferTimer.Stop();
+        // All host state changes and transfer progress trigger a queued refresh.
+        // Coalescing avoids rebuilding WPF lists for every incoming file chunk.
+        service.Changed += RefreshFromEvent;
         Loaded += Start;
         Closing += (s, e) =>
         {

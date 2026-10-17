@@ -21,7 +21,7 @@ on:
       - 'android/**'
       - '.github/workflows/native-preview.yml'
 concurrency:
-  group: nerqo-native-${{ github.ref }}
+  group: nerqo-native-${{ github.ref }}-${{ github.sha }}
   cancel-in-progress: true
 permissions:
   contents: read
@@ -68,15 +68,15 @@ jobs:
       - name: Build previous native installer and verify in-place upgrade
         shell: pwsh
         run: |
-          git fetch --depth 1 origin 7675ce136be4f5c6d6bca51ab2e982ba530a811d
-          git worktree add --detach previous-native 7675ce136be4f5c6d6bca51ab2e982ba530a811d
+          git fetch --depth 1 origin 99c2803bb8a7f1fdd37a469758b30065888d3215
+          git worktree add --detach previous-native 99c2803bb8a7f1fdd37a469758b30065888d3215
           dotnet publish previous-native/desktop/Nerqo.Desktop/Nerqo.Desktop.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:PublishReadyToRun=false -o previous-native/dist/Windows
           if ($LASTEXITCODE -ne 0) { throw 'Previous native publish failed' }
           & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" previous-native/installer/Nerqo.iss
           if ($LASTEXITCODE -ne 0) { throw 'Previous native installer failed' }
           ./tools/qa/windows_upgrade.ps1 -OldInstaller previous-native/dist/Installer/Nerqo-Windows-Setup.exe -NewInstaller dist/Installer/Nerqo-Windows-Setup.exe
           if ($LASTEXITCODE -ne 0) { throw 'Native upgrade verification failed' }
-          python tools/qa/windows_delta_budget.py --baseline-source previous-native/dist/Windows --baseline-version 1.0.8 --target dist/Installer/Nerqo-Windows-Setup.exe
+          python tools/qa/windows_delta_budget.py --baseline-source previous-native/dist/Windows --baseline-version 1.0.9 --target dist/Installer/Nerqo-Windows-Setup.exe
           if ($LASTEXITCODE -ne 0) { throw 'Installer delta budget verification failed' }
       - uses: actions/upload-artifact@v4
         with:

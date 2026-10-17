@@ -10,6 +10,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Runtime.InteropServices;
 using System.IO.Compression;
+using System.Threading.Channels;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
@@ -92,7 +93,13 @@ public sealed class LanHost : IAsyncDisposable
     public List<LiveTransfer> Transfers { get { lock (gate) return state.Uploads.Values.Select(x => new LiveTransfer(x.Id, x.Name, "Receiving", stopped.Contains(x.Id) ? "Paused on Windows" : "Ready / checkpoint saved", x.Offset, x.Size, (System.Diagnostics.Stopwatch.GetTimestamp() - incomingRates.GetValueOrDefault(x.Id).Ticks) < System.Diagnostics.Stopwatch.Frequency * 5L ? incomingRates.GetValueOrDefault(x.Id).Rate : 0)).Concat(live.Values).Take(200).ToList(); } }
     internal void StreamProgress(string id, long done, double rate, string status)
     {
-        lock (gate) if (live.TryGetValue(id, out var entry)) live[id] = entry with { Done = done, Rate = rate, Status = stopped.Contains(id) ? "Paused on Windows" : status };
+        bool updated = false;
+        lock (gate) if (live.TryGetValue(id, out var entry))
+        {
+            live[id] = entry with { Done = done, Rate = rate, Status = stopped.Contains(id) ? "Paused on Windows" : status };
+            updated = true;
+        }
+        if (updated) Changed?.Invoke();
     }
     internal bool StreamStopped(string id) {
         lock (gate) return stopped.Contains(id) || (id.StartsWith("send:") && (!state.Peers.TryGetValue(id.Split(':')[1], out var peer) || peer.Suspended || peer.Expires <= DateTimeOffset.UtcNow));
@@ -157,6 +164,18 @@ public sealed class LanHost : IAsyncDisposable
     public string ReceivedDirectory => Path.Combine(root, "Received");
     public string StorageDirectory => Path.Combine(root, "Storage");
     public event Action? Changed;
+    // A single volatile notification per listener is enough: subscribers fetch
+    // fresh state through the normal authenticated endpoint after each signal.
+    // No user data, bearer tokens or file contents are sent on this stream.
+    private readonly ConcurrentDictionary<Guid, Channel<long>> eventListeners = new();
+    private long eventRevision;
+    private void NotifyEventListeners()
+    {
+        long revision = Interlocked.Increment(ref eventRevision);
+        foreach (var channel in eventListeners.Values)
+            channel.Writer.TryWrite(revision);
+    }
+
     public List<TransferItem> Items { get { lock (gate) return state.Items.Concat(directShares.Values.Select(x => x.Item)).OrderByDescending(x => x.Created).Take(150).Select(x => x).ToList(); } }
     public List<PairedDevice> PairedDevices { get { lock (gate) return state.Peers.Where(x => x.Value.Expires > DateTimeOffset.UtcNow).Select(x => new PairedDevice(x.Key, x.Value.Name, x.Value.Expires, x.Value.Suspended)).OrderBy(x => x.Name).ToList(); } }
     public List<TransferHistoryEntry> History { get { lock (gate) return history.OrderByDescending(x => x.When).Take(500).ToList(); } }
@@ -256,6 +275,7 @@ public sealed class LanHost : IAsyncDisposable
         var staging = output + ".tmp";
         File.WriteAllText(staging, JsonSerializer.Serialize(state));
         File.Move(staging, output, true);
+        NotifyEventListeners();
         Changed?.Invoke();
     }
     [DllImport("kernel32.dll", EntryPoint = "CreateHardLinkW", CharSet = CharSet.Unicode, SetLastError = true)]
@@ -396,7 +416,7 @@ public sealed class LanHost : IAsyncDisposable
             catch (BadHttpRequestException e) { if (!ctx.Response.HasStarted) { ctx.Response.StatusCode = e.StatusCode; await ctx.Response.WriteAsJsonAsync(new { error = e.Message }); } }
             catch (JsonException) { if (!ctx.Response.HasStarted) { ctx.Response.StatusCode = 400; await ctx.Response.WriteAsJsonAsync(new { error = "Invalid JSON" }); } }
         });
-        app.MapGet("/api/status", (HttpContext ctx) => Results.Json(new { name = Environment.MachineName, authorized = Authorize(ctx) != null, port = Port, version = "1.0.9", transferProtocol = 2, band = WifiInspector.GetBand() }));
+        app.MapGet("/api/status", (HttpContext ctx) => Results.Json(new { name = Environment.MachineName, authorized = Authorize(ctx) != null, port = Port, version = typeof(LanHost).Assembly.GetName().Version?.ToString(3) ?? "unknown", transferProtocol = 2, band = WifiInspector.GetBand() }));
         app.MapPost("/api/pair", async (HttpContext ctx) =>
         {
             string ip = ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown";
@@ -446,6 +466,58 @@ public sealed class LanHost : IAsyncDisposable
                 Save();
             }
             return Results.Json(new { confirmed = true });
+        });
+        // HTTP Server-Sent Events: immediate notifications, no periodic GET
+        // refresh, with a small keepalive comment to detect broken Wi-Fi links.
+        // Android reconnects and resynchronizes after any interruption.
+        app.MapGet("/api/events", async (HttpContext ctx) =>
+        {
+            if (Authorize(ctx) == null)
+            {
+                var denied = Unauthorized(ctx);
+                await denied.ExecuteAsync(ctx);
+                return;
+            }
+            ctx.Response.ContentType = "text/event-stream";
+            ctx.Response.Headers.CacheControl = "no-cache, no-store";
+            ctx.Response.Headers["X-Accel-Buffering"] = "no";
+            var channel = Channel.CreateBounded<long>(new BoundedChannelOptions(1)
+            {
+                FullMode = BoundedChannelFullMode.DropOldest,
+                SingleReader = true,
+                SingleWriter = false
+            });
+            Guid id = Guid.NewGuid();
+            eventListeners[id] = channel;
+            try
+            {
+                // Always synchronize on subscribe, so reconnect never misses a
+                // change that happened while the phone was disconnected.
+                await ctx.Response.WriteAsync("event: changed\ndata: " + Interlocked.Read(ref eventRevision) + "\n\n", ctx.RequestAborted);
+                await ctx.Response.Body.FlushAsync(ctx.RequestAborted);
+                while (!ctx.RequestAborted.IsCancellationRequested)
+                {
+                    using var wait = CancellationTokenSource.CreateLinkedTokenSource(ctx.RequestAborted);
+                    wait.CancelAfter(TimeSpan.FromSeconds(20));
+                    long revision;
+                    try { revision = await channel.Reader.ReadAsync(wait.Token); }
+                    catch (OperationCanceledException) when (!ctx.RequestAborted.IsCancellationRequested)
+                    {
+                        // A protocol heartbeat is not a data refresh. It allows
+                        // intermediaries and clients to detect idle TCP failures.
+                        if (Authorize(ctx) == null) break;
+                        await ctx.Response.WriteAsync(": keepalive\n\n", ctx.RequestAborted);
+                        await ctx.Response.Body.FlushAsync(ctx.RequestAborted);
+                        continue;
+                    }
+                    if (Authorize(ctx) == null) break;
+                    await ctx.Response.WriteAsync("event: changed\ndata: " + revision + "\n\n", ctx.RequestAborted);
+                    await ctx.Response.Body.FlushAsync(ctx.RequestAborted);
+                }
+            }
+            catch (OperationCanceledException) when (ctx.RequestAborted.IsCancellationRequested) { }
+            catch (IOException) { /* Client switched Wi-Fi or suspended the app. */ }
+            finally { eventListeners.TryRemove(id, out _); channel.Writer.TryComplete(); }
         });
         app.MapGet("/api/items", (HttpContext ctx) => Authorize(ctx) == null ? Unauthorized(ctx) : Results.Json(new { items = Items }));
         app.MapPost("/api/items", async (HttpContext ctx) =>

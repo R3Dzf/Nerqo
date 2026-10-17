@@ -158,14 +158,51 @@ using var client = new HttpClient(handler) { BaseAddress = new Uri("https://127.
 var status = await client.GetFromJsonAsync<JsonElement>("/api/status");
 if (status.GetProperty("port").GetInt32() != 44888) throw new Exception("Status endpoint failed");
 if ((await client.GetAsync("/api/items")).StatusCode != System.Net.HttpStatusCode.Unauthorized) throw new Exception("Unpaired access was permitted");
+if ((await client.GetAsync("/api/events")).StatusCode != System.Net.HttpStatusCode.Unauthorized) throw new Exception("Unpaired SSE subscription was permitted");
 var bad = await client.PostAsJsonAsync("/api/pair", new { pin = "0000000", name = "Smoke" });
 if (bad.IsSuccessStatusCode) throw new Exception("Incorrect pairing code accepted");
 var pair = await client.PostAsJsonAsync("/api/pair", new { pin = host.PairCode, name = "Smoke" });
 pair.EnsureSuccessStatusCode();
 string token = (await pair.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("token").GetString()!;
 client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+// The long-lived event stream must deliver both its initial snapshot and
+// subsequent state changes without a seven-second Android polling loop.
+using var eventsClient = new HttpClient(new HttpClientHandler
+{
+    ServerCertificateCustomValidationCallback = (_, cert, _, _) =>
+        cert != null && cert.GetCertHashString(HashAlgorithmName.SHA256)
+            .Equals(host.ServerFingerprint, StringComparison.OrdinalIgnoreCase)
+}) { BaseAddress = client.BaseAddress, Timeout = Timeout.InfiniteTimeSpan };
+eventsClient.DefaultRequestHeaders.Authorization =
+    new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+using var eventsResponse = await eventsClient.GetAsync("/api/events", HttpCompletionOption.ResponseHeadersRead);
+eventsResponse.EnsureSuccessStatusCode();
+if (eventsResponse.Content.Headers.ContentType?.MediaType != "text/event-stream")
+    throw new Exception("SSE endpoint returned incorrect content type");
+using var eventReader = new StreamReader(await eventsResponse.Content.ReadAsStreamAsync());
+async Task ReadChange()
+{
+    using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(7));
+    string type = "";
+    while (true)
+    {
+        string? line = await eventReader.ReadLineAsync().WaitAsync(deadline.Token);
+        if (line == null) throw new Exception("SSE ended before a change arrived");
+        if (line.StartsWith("event: ")) type = line[7..].Trim();
+        if (line.Length == 0)
+        {
+            if (type == "changed") return;
+            type = "";
+        }
+    }
+}
+await ReadChange(); // Initial full synchronization, including after reconnect.
+var stopwatch = System.Diagnostics.Stopwatch.StartNew();
 var note = await client.PostAsJsonAsync("/api/items", new { kind = "link", content = "https://example.com/" });
 note.EnsureSuccessStatusCode();
+await ReadChange();
+if (stopwatch.Elapsed > TimeSpan.FromSeconds(6))
+    throw new Exception("State changes did not push to Android promptly");
 var uploaded = Encoding.UTF8.GetBytes("Nerqo native end-to-end roundtrip via local network");
 var begin = await client.PostAsJsonAsync("/api/transfers/begin", new { name = "native.txt", size = uploaded.Length });
 begin.EnsureSuccessStatusCode();

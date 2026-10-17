@@ -44,6 +44,25 @@ class Handler(BaseHTTPRequestHandler):
                                   'published': state['published'], 'ranges': state['range_offsets'], 'uploadChunks': state['upload_chunks']})
             return
         if not self.authenticated(): return
+        if route.path == '/api/events':
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/event-stream')
+            self.send_header('Cache-Control', 'no-cache')
+            self.end_headers()
+            try:
+                # Android test verifies an initial snapshot and a second push
+                # using the *same* authenticated long-lived TLS connection.
+                for rev in (1, 2):
+                    self.wfile.write(('event: changed\ndata: ' + str(rev) + '\n\n').encode('ascii'))
+                    self.wfile.flush()
+                    time.sleep(.25)
+                while True:
+                    time.sleep(5)
+                    self.wfile.write(b': keepalive\n\n')
+                    self.wfile.flush()
+            except (OSError, ssl.SSLError, ConnectionError):
+                pass
+            return
         if route.path == '/api/items':
             self.json({'items': [{'id': UI, 'kind': 'file', 'sender': 'CI Windows fixture', 'content': 'Native-resume-fixture.bin', 'size': len(UI_DATA), 'sha256': UI_SHA}]})
             return

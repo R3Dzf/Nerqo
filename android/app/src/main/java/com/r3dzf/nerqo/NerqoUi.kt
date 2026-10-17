@@ -71,7 +71,7 @@ private fun bytes(size: Long): String = when {
     shareText: String, manualIp: String, darkMode: Boolean,
     onShareText: (String) -> Unit, onManualIp: (String) -> Unit, onTheme: (Boolean) -> Unit,
     onScanQr: () -> Unit, onDiscover: () -> Unit, onSelectDevice: (Device) -> Unit,
-    onManualConnect: () -> Unit, onRefresh: () -> Unit, onDisconnect: () -> Unit, onReconnect: () -> Unit, onForget: () -> Unit, savedConnection: Boolean, onFiles: () -> Unit, onFolder: () -> Unit,
+    onManualConnect: () -> Unit, onDisconnect: () -> Unit, onReconnect: () -> Unit, onForget: () -> Unit, savedConnection: Boolean, onFiles: () -> Unit, onFolder: () -> Unit,
     onSendText: () -> Unit, onPaste: () -> Unit, onEntry: (SharedEntry) -> Unit,
     onHotspot: () -> Unit, preferFiveGHz: Boolean, onFiveGHz: (Boolean) -> Unit, onStopHotspot: () -> Unit, onWifiSettings: () -> Unit, onUpdates: () -> Unit
 ) {
@@ -166,7 +166,6 @@ private fun bytes(size: Long): String = when {
                     } }
                     item { Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         Text("Available shares", fontSize = 22.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-                        TextButton(onClick = onRefresh, enabled = !busy && paired) { Text("Refresh") }
                     } }
                     if (entries.isEmpty()) item { Panel { Symbol(R.drawable.ic_transfer); Title("Nothing shared yet"); Caption("Your files and notes will appear here. Send a little something to get started.") } }
                     // The API already returns newest first. UUID order is not chronological.
@@ -197,7 +196,7 @@ private fun bytes(size: Long): String = when {
                         if (savedConnection && !paired) OutlinedButton(onClick = onReconnect, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("Reconnect") }
                         if (savedConnection) TextButton(onClick = onForget, enabled = !busy && transfer == null) { Text("Forget computer") }
                         if (paired) OutlinedButton(onClick = onDisconnect, modifier = Modifier.fillMaxWidth()) { Text("Disconnect") }
-                        if (paired) TextButton(onClick = { onRefresh(); page = 0 }, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("Open transfers") }
+                        if (paired) TextButton(onClick = { page = 0 }, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("Open transfers") }
                     } }
                     if (nearby.isNotEmpty()) item { Text("Nearby", fontSize = 20.sp, fontWeight = FontWeight.SemiBold) }
                     items(nearby, key = { "${it.address}:${it.port}" }) { found -> Panel {
@@ -252,6 +251,12 @@ private fun bytes(size: Long): String = when {
                             Column(Modifier.weight(1f)) { Title("Appearance"); Caption("Use a softer dark palette.") }
                             Switch(checked = darkMode, onCheckedChange = onTheme, modifier = Modifier.padding(start = 8.dp).semantics { contentDescription = "Dark appearance" })
                         }
+                    } }
+                    item { Panel {
+                        Title("Live device connection")
+                        Caption("Your paired Windows PC pushes new shares instantly using a secure, continuous local connection. No repeated Refresh requests.")
+                        Caption("Nerqo keeps a visible Android connection notification while connected, even when you switch apps. Use Disconnect in that notification or on the Devices screen to stop it.")
+                        Caption("If Wi-Fi is lost, Nerqo retries automatically. Android power restrictions or force-stop can still interrupt background service; reopen Nerqo if that happens.")
                     } }
                     item { Panel {
                         Title("Your local network")

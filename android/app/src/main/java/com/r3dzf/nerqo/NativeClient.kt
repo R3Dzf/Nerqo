@@ -164,6 +164,44 @@ internal object NativeClient {
             return response(conn)
         } finally { close(conn) }
     }
+    /**
+     * One pinned TLS stream stays open instead of GET /api/items every 7 seconds.
+     * The server sends an initial event, immediate change events and heartbeat
+     * comments. A dropped link throws so the service can reconnect with backoff.
+     */
+    fun watchEvents(
+        device: Device,
+        token: String,
+        onConnection: (HttpURLConnection) -> Unit,
+        onChanged: () -> Unit
+    ) {
+        val conn = connect(device.endpoint + "/api/events", "GET", token)
+        conn.readTimeout = 65000
+        try {
+            onConnection(conn)
+            when (conn.responseCode) {
+                401 -> throw PairingExpiredException()
+                423 -> throw ConnectionPausedException()
+            }
+            if (conn.responseCode != 200) throw IOException("Live connection rejected: HTTP " + conn.responseCode)
+            var event = ""
+            conn.inputStream.bufferedReader(Charsets.UTF_8).use { reader ->
+                while (true) {
+                    val line = reader.readLine() ?: throw IOException("Live connection closed")
+                    when {
+                        line.startsWith("event: ") -> event = line.removePrefix("event: ").trim()
+                        line.isEmpty() -> {
+                            if (event == "changed") onChanged()
+                            event = ""
+                        }
+                    }
+                }
+            }
+        } finally {
+            close(conn)
+        }
+    }
+
     fun status(device: Device): JSONObject = response(connect(device.endpoint + "/api/status", "GET"))
     fun pair(device: Device, pin: String): String = postJson(device.endpoint, "/api/pair", JSONObject()
         .put("pin", pin).put("name", android.os.Build.MODEL)).getString("token")
