@@ -80,7 +80,7 @@ class MainActivity : ComponentActivity() {
             runCatching { bindLocalNetwork(); NativeClient.publishClipboard(target, access, value) }
         }
     }
-    private fun setClipboardEnabled(value: Boolean) {
+    private fun updateClipboardSync(value: Boolean) {
         clipboardEnabled = value
         prefs.edit().putBoolean("clipboard_enabled", value).apply()
         clipboardRemoteRevision = -1
@@ -667,7 +667,7 @@ class MainActivity : ComponentActivity() {
                 shareText = shareText, manualIp = manualIp, darkMode = darkMode,
                 onShareText = { shareText = it }, onManualIp = { manualIp = it },
                 onTheme = { darkMode = it; prefs.edit().putBoolean("dark_mode", it).apply() },
-                clipboardEnabled = clipboardEnabled, onClipboardEnabled = ::setClipboardEnabled,
+                clipboardEnabled = clipboardEnabled, onClipboardEnabled = ::updateClipboardSync,
                 onScanQr = ::scanPairQr, onDiscover = ::scan, onSelectDevice = ::select,
                 onManualConnect = ::manualConnect, onRefresh = { refresh() }, onDisconnect = ::disconnect, onReconnect = ::reconnect, onForget = ::forget, savedConnection = device != null,
                 onFiles = { picker.launch(arrayOf("*/*")) }, onFolder = { folderPicker.launch(null) },
