@@ -64,7 +64,7 @@ class NativeSources(unittest.TestCase):
         gradle=(ROOT/'android/app/build.gradle.kts').read_text()
         self.assertIn('org.jetbrains.kotlin.plugin.compose',gradle)
         self.assertIn('versionCode = 10010',gradle)
-        self.assertIn('versionName = "1.0.9"',gradle)
+        self.assertIn('versionName = "1.0.10"',gradle)
     def test_offline_protocol_and_radio_data(self):
         host=(ROOT/'desktop/Nerqo.Desktop/Services/LanHost.cs').read_text()
         client=(ROOT/'android/app/src/main/java/com/r3dzf/nerqo/NativeClient.kt').read_text()
