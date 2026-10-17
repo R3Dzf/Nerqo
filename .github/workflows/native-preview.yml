@@ -21,7 +21,7 @@ on:
       - 'android/**'
       - '.github/workflows/native-preview.yml'
 concurrency:
-  group: nerqo-native-${{ github.ref }}
+  group: nerqo-native-${{ github.ref }}-${{ github.sha }}
   cancel-in-progress: true
 permissions:
   contents: read
