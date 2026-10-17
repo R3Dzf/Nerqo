@@ -81,10 +81,13 @@ jobs:
           set -euo pipefail
           if gh release view v1.0.10 >/dev/null 2>&1; then
             echo 'Stable release already exists; leaving it unchanged'
+            gh release view v1.0.10 --json tagName,assets
+            test "$(gh release view v1.0.10 --json assets --jq '.assets | length')" -ge 4
+            test "$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq '.tag_name')" = v1.0.10
             exit 0
           fi
           test -s staging/release/Nerqo-Windows-Setup.exe
           test -s staging/release/Nerqo-Android.apk
           test -s staging/release/update-manifest.json
           gh release create v1.0.10 staging/release/* --target 7d9eb9757031729eaff29ca3c6a91fa1375e538f --title 'Nerqo v1.0.10 Stable' --notes-file docs/releases/v1.0.10.md --latest
-          gh release view v1.0.10 --json tagName,assets,isLatest
+          gh release view v1.0.10 --json tagName,assets
