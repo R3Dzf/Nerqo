@@ -9,6 +9,12 @@ on:
       - 'tools/qa/android_transfer_server.py'
       - '.github/workflows/native-ui.yml'
   workflow_dispatch:
+  pull_request:
+    paths:
+      - 'android/**'
+      - 'tools/qa/android_ui.py'
+      - 'tools/qa/android_transfer_server.py'
+      - '.github/workflows/native-ui.yml'
 permissions:
   contents: read
 concurrency:
@@ -57,7 +63,7 @@ jobs:
             adb install -r android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
             adb shell am instrument -w -e fingerprint $NERQO_FIXTURE_FP com.r3dzf.nerqo.test/androidx.test.runner.AndroidJUnitRunner | tee /tmp/nerqo-instrumentation.txt
             adb logcat -d -s AndroidRuntime:E > ui-smoke-android/runtime.txt
-            grep -q 'OK (10 tests)' /tmp/nerqo-instrumentation.txt
+            grep -q 'OK (11 tests)' /tmp/nerqo-instrumentation.txt
             python tools/qa/android_ui.py
       - name: Collect emulator diagnostics
         if: always()
